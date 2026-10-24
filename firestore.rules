@@ -1,27 +1,108 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function gm() {
+      return request.auth != null
+        && request.auth.uid == 'ctBLgrVgkLOzUJYTyYgU9IwejYx1';
+    }
+    function verified() {
+      return request.auth != null
+        && request.auth.token.email_verified == true;
+    }
+    function approved() {
+      return verified()
+        && exists(/databases/$(database)/documents/santara_player_access/$(request.auth.uid))
+        && get(/databases/$(database)/documents/santara_player_access/$(request.auth.uid)).data.enabled == true;
+    }
+    function member() {
+      return gm() || approved();
+    }
 
-    // Only the published player-facing snapshot is publicly readable.
+    // GM uploads only a public snapshot; verified, approved Trainers can read it.
     match /santara_publication/current {
-      allow get: if true;
-      allow create, update: if request.auth != null
-        && request.auth.uid == 'ctBLgrVgkLOzUJYTyYgU9IwejYx1'
-        && request.resource.data.keys().hasOnly(['bundle', 'updatedAt'])
-        && request.resource.data.keys().hasAll(['bundle', 'updatedAt'])
+      allow get: if member();
+      allow list, delete: if false;
+      allow create, update: if gm()
+        && request.resource.data.keys().hasOnly(['bundle','updatedAt'])
+        && request.resource.data.keys().hasAll(['bundle','updatedAt'])
         && request.resource.data.bundle is map
         && request.resource.data.bundle.keys().hasOnly([
-          'kind', 'version', 'generatedAt', 'sites', 'requests', 'sightings'
+          'kind','version','generatedAt','sites','requests','sightings'
         ])
         && request.resource.data.bundle.kind == 'santaraPublished'
         && request.resource.data.bundle.sites is list
         && request.resource.data.bundle.requests is list
         && request.resource.data.bundle.sightings is list
         && request.resource.data.updatedAt == request.time;
-      allow delete: if false;
     }
 
-    // All other database documents stay inaccessible to browser clients.
+    // A verified player can request approval for their own Firebase UID.
+    match /santara_access_requests/{uid} {
+      allow get: if gm() || (verified() && request.auth.uid == uid);
+      allow list: if gm();
+      allow create: if verified()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['email','createdAt'])
+        && request.resource.data.keys().hasAll(['email','createdAt'])
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if gm();
+    }
+
+    // Only the GM can grant or revoke access.
+    match /santara_player_access/{uid} {
+      allow get: if gm() || (verified() && request.auth.uid == uid);
+      allow list: if gm();
+      allow create, update: if gm()
+        && request.resource.data.keys().hasOnly(['email','enabled','approvedAt'])
+        && request.resource.data.keys().hasAll(['email','enabled','approvedAt'])
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 320
+        && request.resource.data.enabled is bool
+        && request.resource.data.approvedAt == request.time;
+      allow delete: if gm();
+    }
+
+    // Approved Trainers can browse cards; only an owner edits their own.
+    match /santara_trainer_cards/{uid} {
+      allow get, list: if member();
+      allow create, update: if member()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          'ownerUid','trainerName','trainerClass','hometown','partnerPokemon',
+          'favoriteType','theme','avatar','badgeCount','quote','updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'ownerUid','trainerName','trainerClass','hometown','partnerPokemon',
+          'favoriteType','theme','avatar','badgeCount','quote','updatedAt'
+        ])
+        && request.resource.data.ownerUid == uid
+        && request.resource.data.trainerName is string
+        && request.resource.data.trainerName.size() > 0
+        && request.resource.data.trainerName.size() <= 32
+        && request.resource.data.trainerClass is string
+        && request.resource.data.trainerClass.size() <= 32
+        && request.resource.data.hometown is string
+        && request.resource.data.hometown.size() <= 48
+        && request.resource.data.partnerPokemon is string
+        && request.resource.data.partnerPokemon.size() <= 48
+        && request.resource.data.favoriteType is string
+        && request.resource.data.favoriteType.size() <= 30
+        && request.resource.data.theme in [
+          'crimson','ocean','emerald','violet','amber','midnight','rose','frost'
+        ]
+        && request.resource.data.avatar is string
+        && request.resource.data.avatar.size() <= 12
+        && request.resource.data.badgeCount is int
+        && request.resource.data.badgeCount >= 0
+        && request.resource.data.badgeCount <= 8
+        && request.resource.data.quote is string
+        && request.resource.data.quote.size() <= 180
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if gm() || (member() && request.auth.uid == uid);
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
