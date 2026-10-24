@@ -1,0 +1,29 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Only the published player-facing snapshot is publicly readable.
+    match /santara_publication/current {
+      allow get: if true;
+      allow create, update: if request.auth != null
+        && request.auth.uid == 'ctBLgrVgkLOzUJYTyYgU9IwejYx1'
+        && request.resource.data.keys().hasOnly(['bundle', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['bundle', 'updatedAt'])
+        && request.resource.data.bundle is map
+        && request.resource.data.bundle.keys().hasOnly([
+          'kind', 'version', 'generatedAt', 'sites', 'requests', 'sightings'
+        ])
+        && request.resource.data.bundle.kind == 'santaraPublished'
+        && request.resource.data.bundle.sites is list
+        && request.resource.data.bundle.requests is list
+        && request.resource.data.bundle.sightings is list
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    // All other database documents stay inaccessible to browser clients.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
