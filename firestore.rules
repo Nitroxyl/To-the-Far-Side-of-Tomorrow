@@ -71,11 +71,15 @@ service cloud.firestore {
         && request.auth.uid == uid
         && request.resource.data.keys().hasOnly([
           'ownerUid','trainerName','trainerClass','hometown','partnerPokemon',
-          'favoriteType','theme','avatar','badgeCount','quote','updatedAt'
+          'favoriteType','theme','avatar','badgeCount','quote','updatedAt',
+          'trainerTitle','team','pattern','customPrimary','customSecondary',
+          'portraitData','bannerData'
         ])
         && request.resource.data.keys().hasAll([
           'ownerUid','trainerName','trainerClass','hometown','partnerPokemon',
-          'favoriteType','theme','avatar','badgeCount','quote','updatedAt'
+          'favoriteType','theme','avatar','badgeCount','quote','updatedAt',
+          'trainerTitle','team','pattern','customPrimary','customSecondary',
+          'portraitData','bannerData'
         ])
         && request.resource.data.ownerUid == uid
         && request.resource.data.trainerName is string
@@ -83,6 +87,8 @@ service cloud.firestore {
         && request.resource.data.trainerName.size() <= 32
         && request.resource.data.trainerClass is string
         && request.resource.data.trainerClass.size() <= 32
+        && request.resource.data.trainerTitle is string
+        && request.resource.data.trainerTitle.size() <= 32
         && request.resource.data.hometown is string
         && request.resource.data.hometown.size() <= 48
         && request.resource.data.partnerPokemon is string
@@ -99,6 +105,31 @@ service cloud.firestore {
         && request.resource.data.badgeCount <= 8
         && request.resource.data.quote is string
         && request.resource.data.quote.size() <= 180
+        && request.resource.data.team is list
+        && request.resource.data.team.size() == 6
+        && request.resource.data.team[0] is string
+        && request.resource.data.team[0].size() <= 32
+        && request.resource.data.team[1] is string
+        && request.resource.data.team[1].size() <= 32
+        && request.resource.data.team[2] is string
+        && request.resource.data.team[2].size() <= 32
+        && request.resource.data.team[3] is string
+        && request.resource.data.team[3].size() <= 32
+        && request.resource.data.team[4] is string
+        && request.resource.data.team[4].size() <= 32
+        && request.resource.data.team[5] is string
+        && request.resource.data.team[5].size() <= 32
+        && request.resource.data.pattern in ['plain','grid','diagonal','rings','stars']
+        && request.resource.data.customPrimary.matches('^#[0-9a-fA-F]{6}$')
+        && request.resource.data.customSecondary.matches('^#[0-9a-fA-F]{6}$')
+        && request.resource.data.portraitData is string
+        && request.resource.data.portraitData.size() <= 150000
+        && (request.resource.data.portraitData == '' ||
+            request.resource.data.portraitData.matches('^data:image/webp;base64,[A-Za-z0-9+/=]+$'))
+        && request.resource.data.bannerData is string
+        && request.resource.data.bannerData.size() <= 260000
+        && (request.resource.data.bannerData == '' ||
+            request.resource.data.bannerData.matches('^data:image/webp;base64,[A-Za-z0-9+/=]+$'))
         && request.resource.data.updatedAt == request.time;
       allow delete: if gm() || (member() && request.auth.uid == uid);
     }
