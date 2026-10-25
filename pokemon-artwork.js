@@ -28,11 +28,13 @@ export function artworkPropagation(kind,id,previous,next,pokemon=[]){
   if(kind==='species'){
    if(mon.source!=='custom'||mon.speciesKey!=='custom:'+id)continue;
    if(!canUpdateArtwork(mon,previous))continue;
+   if(normalized(mon.spriteData)===normalized(next.spriteData)&&normalized(mon.spriteUrl)===normalized(next.spriteUrl))continue;
    results.push({id:mon.id,patch:{spriteUrl:normalized(next.spriteUrl),
      spriteData:normalized(next.spriteData)}});
   }else{
    const form=mon.megaForm;
    if(!form||form.slug!==id||!canUpdateArtwork(form,previous))continue;
+   if(normalized(form.spriteData)===normalized(next.spriteData)&&normalized(form.spriteUrl)===normalized(next.spriteUrl))continue;
    results.push({id:mon.id,patch:{megaForm:{...form,
      spriteUrl:normalized(next.spriteUrl),spriteData:normalized(next.spriteData)}}});
   }
