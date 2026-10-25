@@ -44,7 +44,7 @@ label.gimmick-tile{flex-direction:row;align-items:flex-start}
 .artwork-empty small{font-size:12px}
 .artwork-editor{display:grid;grid-template-columns:minmax(200px,360px) 1fr;gap:22px;align-items:start}
 .artwork-large-preview{height:345px;background:radial-gradient(circle at 50% 30%,#234758,#0c1e2a);border:1px solid #3c6071;border-radius:16px;display:flex;align-items:center;justify-content:center;padding:18px;overflow:hidden}
-.artwork-sync{display:flex;align-items:flex-start;gap:10px;font-size:13px;font-weight:500;line-height:1.5}
+.artwork-sync{display:flex;flex-direction:row;align-items:flex-start;gap:10px;font-size:13px;font-weight:500;line-height:1.5}
 .artwork-sync input[type=checkbox]{width:19px;height:19px;flex:0 0 auto;margin:1px 0 0;accent-color:var(--teal)}
 .artwork-editor .actions.full{grid-column:1/-1}
 @media(max-width:740px){.artwork-editor{grid-template-columns:1fr}.artwork-large-preview{height:280px}.artwork-gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
