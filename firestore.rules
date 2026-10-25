@@ -181,18 +181,72 @@ service cloud.firestore {
       allow delete: if gm();
     }
 
+    // GM controls which mechanics a trainer may use. Player reads only their own document.
+    function gimmicksValid(d) {
+      return d.keys().hasOnly(['tera','mega','zMove','dynamax','updatedAt'])
+        && d.keys().hasAll(['tera','mega','zMove','dynamax','updatedAt'])
+        && d.tera is bool && d.mega is bool && d.zMove is bool && d.dynamax is bool
+        && d.updatedAt == request.time;
+    }
+    match /santara_trainer_gimmicks/{uid} {
+      allow get: if gm() || (approved() && request.auth.uid == uid);
+      allow list: if gm();
+      allow create, update: if gm() && gimmicksValid(request.resource.data);
+      allow delete: if gm();
+    }
+    function gimmickGranted(uid,key) {
+      return exists(/databases/$(database)/documents/santara_trainer_gimmicks/$(uid))
+        && get(/databases/$(database)/documents/santara_trainer_gimmicks/$(uid)).data[key] == true;
+    }
+
+    // The GM-only Mega library does not reveal unreleased forms to players.
+    // Once assigned, an individual Pokémon carries an owner-visible form snapshot.
+    function megaSnapshotValid(m) {
+      return m is map
+        && m.keys().hasOnly(['slug','name','baseSpeciesKey','baseStats','types','ability','spriteUrl','spriteData','source'])
+        && m.keys().hasAll(['slug','name','baseSpeciesKey','baseStats','types','ability','spriteUrl','spriteData','source'])
+        && m.slug is string && m.slug.matches('^[a-z0-9-]{2,70}$')
+        && m.name is string && m.name.size() > 0 && m.name.size() <= 85
+        && m.baseSpeciesKey is string && m.baseSpeciesKey.size() > 0 && m.baseSpeciesKey.size() <= 110
+        && statsValid(m.baseStats)
+        && shortList(m.types,2) && m.types.size() > 0
+        && m.ability is string && m.ability.size() > 0 && m.ability.size() <= 48
+        && urlValid(m.spriteUrl) && imageValid(m.spriteData)
+        && m.source in ['official','custom'];
+    }
+    match /santara_mega_forms/{slug} {
+      allow get, list: if gm();
+      allow create, update: if gm()
+        && request.resource.data.slug == slug
+        && request.resource.data.keys().hasOnly(['slug','name','baseSpeciesKey','baseStats','types','ability','spriteUrl','spriteData','source','updatedAt'])
+        && request.resource.data.keys().hasAll(['slug','name','baseSpeciesKey','baseStats','types','ability','spriteUrl','spriteData','source','updatedAt'])
+        && request.resource.data.slug is string && request.resource.data.slug.matches('^[a-z0-9-]{2,70}$')
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 85
+        && request.resource.data.baseSpeciesKey is string && request.resource.data.baseSpeciesKey.size() > 0
+        && request.resource.data.baseSpeciesKey.size() <= 110
+        && statsValid(request.resource.data.baseStats)
+        && shortList(request.resource.data.types,2) && request.resource.data.types.size() > 0
+        && request.resource.data.ability is string && request.resource.data.ability.size() > 0 && request.resource.data.ability.size() <= 48
+        && urlValid(request.resource.data.spriteUrl) && imageValid(request.resource.data.spriteData)
+        && request.resource.data.source in ['official','custom']
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if gm();
+    }
+
     // GM controls species, base stats, levels, moves, abilities and ownership.
     // Approved Trainers can only track their own HP, status, nickname, notes and party slot.
     function pokemonValid(d) {
       return d.keys().hasOnly([
           'ownerUid','speciesKey','speciesName','source','baseStats','types','abilities',
           'spriteUrl','spriteData','nickname','level','ability','maxHp','currentHp',
-          'status','slot','heldItem','moves','origin','notes','updatedAt'
+          'status','slot','heldItem','moves','origin','notes','updatedAt',
+          'teraType','megaForm','megaActive','teraActive','zUsed','dynamaxTurns','dynamaxUsed'
         ])
         && d.keys().hasAll([
           'ownerUid','speciesKey','speciesName','source','baseStats','types','abilities',
           'spriteUrl','spriteData','nickname','level','ability','maxHp','currentHp',
-          'status','slot','heldItem','moves','origin','notes','updatedAt'
+          'status','slot','heldItem','moves','origin','notes','updatedAt',
+          'teraType','megaForm','megaActive','teraActive','zUsed','dynamaxTurns','dynamaxUsed'
         ])
         && d.ownerUid is string && d.ownerUid.size() >= 10 && d.ownerUid.size() <= 128
         && d.speciesKey is string && d.speciesKey.size() > 0 && d.speciesKey.size() <= 110
@@ -213,6 +267,21 @@ service cloud.firestore {
         && shortList(d.moves,4)
         && d.origin is string && d.origin.size() <= 150
         && d.notes is string && d.notes.size() <= 1000
+        && (!('teraType' in d) || d.teraType in [
+          'normal','fire','water','electric','grass','ice','fighting','poison',
+          'ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy'
+        ])
+        && (!('megaForm' in d) || d.megaForm == null || megaSnapshotValid(d.megaForm))
+        && (!('megaActive' in d) || d.megaActive is bool)
+        && (!('teraActive' in d) || d.teraActive is bool)
+        && (!('zUsed' in d) || d.zUsed is bool)
+        && (!('dynamaxUsed' in d) || d.dynamaxUsed is bool)
+        && (!('dynamaxTurns' in d) || (d.dynamaxTurns is int && d.dynamaxTurns >= 0 && d.dynamaxTurns <= 3))
+        && !(d.get('megaActive',false) == true && d.get('teraActive',false) == true)
+        && !(d.get('megaActive',false) == true && d.get('dynamaxTurns',0) > 0)
+        && !(d.get('teraActive',false) == true && d.get('dynamaxTurns',0) > 0)
+        && (!d.get('megaActive',false) || (d.get('megaForm',null) is map &&
+           d.megaForm.baseSpeciesKey == d.speciesKey))
         && d.updatedAt == request.time;
     }
     match /santara_pokemon/{pokemonId} {
@@ -223,8 +292,19 @@ service cloud.firestore {
         || (approved() && resource.data.ownerUid == request.auth.uid
           && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'currentHp','status','slot','nickname','notes','updatedAt'
+            'currentHp','status','slot','nickname','notes','updatedAt',
+            'teraType','teraActive','megaActive','zUsed','dynamaxTurns','dynamaxUsed'
           ])
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['teraType','teraActive'])
+             || gimmickGranted(resource.data.ownerUid,'tera'))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['megaActive'])
+             || (gimmickGranted(resource.data.ownerUid,'mega')
+                && resource.data.get('megaForm',null) is map
+                && resource.data.megaForm.baseSpeciesKey == resource.data.speciesKey))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['zUsed'])
+             || gimmickGranted(resource.data.ownerUid,'zMove'))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['dynamaxTurns','dynamaxUsed'])
+             || gimmickGranted(resource.data.ownerUid,'dynamax'))
           && pokemonValid(request.resource.data));
     }
 

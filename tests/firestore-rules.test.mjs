@@ -35,3 +35,13 @@ test('Security rules have balanced braces, parentheses and quoted strings',()=>{
  assert.notEqual(mode,'blockComment','Unclosed comment');
  assert.deepEqual(stack,[],'Unclosed Firestore rule expression');
 });
+
+// Keep new mechanics server-authorized; never expose the private Mega catalog.
+test('Gimmick grants and private Mega definitions retain their security boundaries',()=>{
+ assert.ok(rules.includes('match /santara_trainer_gimmicks/{uid}'));
+ assert.ok(rules.includes('match /santara_mega_forms/{slug}'));
+ assert.ok(rules.includes('function gimmickGranted(uid,key)'));
+ assert.ok(rules.includes('gimmickGranted(resource.data.ownerUid'));
+ assert.ok(rules.includes('allow get, list: if gm();'));
+ assert.ok(rules.includes("'megaForm','megaActive','teraActive','zUsed','dynamaxTurns','dynamaxUsed'"));
+});
