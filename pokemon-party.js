@@ -42,6 +42,19 @@ function trainerLabel(uid){
  if(name && name.toLowerCase()!=='new trainer')return name;
  return `${TRAINER_FALLBACK} #${String(uid).slice(0,6)}`;
 }
+function managedTrainers(){
+ const all=new Map(trainers.map(t=>[t.uid,t]));
+ // The Firestore create rule verifies each requester has Trainer access or
+ // an authorized GM role. Retain those identities for later editing, even
+ // if they do not have an ordinary Trainer approval document.
+ for(const r of requests){
+  if(r.status==='rejected'||!r.ownerUid||all.has(r.ownerUid))continue;
+  all.set(r.ownerUid,{uid:r.ownerUid,authorizedRequester:true});
+ }
+ return [...all.values()];
+}
+function mayManageTrainer(uid){return managedTrainers().some(t=>t.uid===uid)}
+
 function customMoveByName(name){
  return customMoves.find(x=>x.name.toLowerCase()===String(name||'').trim().toLowerCase());
 }
@@ -277,7 +290,7 @@ function megaChoiceFor(mon){
  return megaForms.filter(f=>String(f.baseSpeciesKey).toLowerCase()===String(mon?.speciesKey||'').toLowerCase());
 }
 async function saveUnlocks(form){
- if(!GM_SITE||!ownerFilter||!trainers.some(t=>t.uid===ownerFilter))throw Error('Select an approved Trainer.');
+ if(!GM_SITE||!ownerFilter||!mayManageTrainer(ownerFilter))throw Error('Select an approved Trainer or an authorized Pokémon requester.');
  const f=new FormData(form);
  const values={tera:f.has('tera'),mega:f.has('mega'),zMove:f.has('zMove'),dynamax:f.has('dynamax'),updatedAt:serverTimestamp()};
  await setDoc(doc(store,'santara_trainer_gimmicks',ownerFilter),values);
@@ -545,18 +558,26 @@ async function saveRequest(form){
  if(!Number.isInteger(level)||level<1||level>100)throw Error('Choose a level from 1 to 100.');
  const pending=requests.filter(x=>x.status==='pending');
  if(pending.length>=10)throw Error('You already have ten pending requests. Ask your GM to review them first.');
- await addDoc(collection(store,'santara_pokemon_requests'),{
-  ownerUid:user.uid,speciesKey:species.speciesKey,speciesName:species.speciesName,
-  level,nickname:cap(f.get('nickname'),32),notes:cap(f.get('notes'),300),
-  status:'pending',createdAt:serverTimestamp(),resolvedAt:null
- });
+ try{
+  await addDoc(collection(store,'santara_pokemon_requests'),{
+   ownerUid:user.uid,speciesKey:species.speciesKey,speciesName:species.speciesName,
+   level,nickname:cap(f.get('nickname'),32),notes:cap(f.get('notes'),300),
+   status:'pending',createdAt:serverTimestamp(),resolvedAt:null
+  });
+ }catch(err){
+  if(err?.code==='permission-denied'||/missing or insufficient permissions/i.test(err?.message||'')){
+   throw Error('Firebase denied the Pokémon request. The GM must publish the updated Firestore rules that allow approved Trainers and authorized GM accounts to submit requests. Check Account & GM Access if your role has not been approved.');
+  }
+  throw err;
+ }
  say(`${species.speciesName} request sent to your GM.`);
  clearSelection();
 }
 async function reviewRequest(id){
  const request=requests.find(r=>r.id===id&&r.status==='pending');
  if(!request)throw Error('This request has already been handled.');
- if(!trainers.some(t=>t.uid===request.ownerUid))throw Error('The requesting Trainer is no longer approved.');
+ // The request was created by an authenticated approved Trainer or GM.
+ // A GM requester may not have an ordinary santara_player_access record.
  ownerFilter=request.ownerUid;
  const species=request.speciesKey.startsWith('custom:')
   ?customFrom(customs.find(x=>'custom:'+x.slug===request.speciesKey))
@@ -581,7 +602,7 @@ function roster(){
  const storage=mine.filter(m=>!Number(m.slot)||Number(m.slot)>6);
  const slots=Array.from({length:6},(_,i)=>active.find(m=>Number(m.slot)===i+1));
  return `<div class="toolbar"><h2>${GM_SITE?'Trainer Party':'Current Party'} <span class="chip">${active.length}/6</span></h2>
- <div class="tabs">${GM_SITE?`<select id="trainer-filter" aria-label="Select Trainer">${option('','Select trainer…',ownerFilter)}${trainers.map(t=>option(t.uid,trainerLabel(t.uid),ownerFilter)).join('')}</select><button class="btn primary" data-act="new">+ Assign Pokémon</button>`:'<button class="btn primary" data-act="request">+ Request Pokémon</button>'}
+ <div class="tabs">${GM_SITE?`<select id="trainer-filter" aria-label="Select Trainer">${option('','Select trainer…',ownerFilter)}${managedTrainers().map(t=>option(t.uid,trainerLabel(t.uid)+(t.authorizedRequester?' · authorized requester':''),ownerFilter)).join('')}</select><button class="btn primary" data-act="new">+ Assign Pokémon</button>`:'<button class="btn primary" data-act="request">+ Request Pokémon</button>'}
  <button class="btn ${view==='party'?'primary':''}" data-act="party">Party</button><button class="btn ${view==='storage'?'primary':''}" data-act="storage">Storage (${storage.length})</button></div></div>`;
 }
 function listView(){
@@ -627,7 +648,7 @@ function gmForm(){
  <form id="assign-form" class="form-grid">
  <label class="field full">Species / Form<input id="species-query" name="species" list="species-list" required placeholder="e.g. Riolu, Charizard, custom Mega Charizard Z" value="${esc(d.speciesName||'')}"><datalist id="species-list">${customs.map(x=>`<option value="${esc(x.name)}"></option>`).join('')}</datalist></label>
  <div class="actions"><button class="btn" data-act="lookup" type="button">Fetch stats from PokéAPI / custom list</button><span class="hint" id="species-source">${draft?esc(d.source||''):'Look up a species before saving.'}</span></div>
- <label class="field">Assign to Trainer<select name="ownerUid" required>${trainers.map(t=>option(t.uid,trainerLabel(t.uid),d.ownerUid||ownerFilter)).join('')}</select></label>
+ <label class="field">Assign to Trainer<select name="ownerUid" required>${managedTrainers().map(t=>option(t.uid,trainerLabel(t.uid)+(t.authorizedRequester?' · authorized requester':''),d.ownerUid||ownerFilter)).join('')}</select></label>
  <label class="field">Level<input name="level" type="number" min="1" max="100" required value="${level}"></label>
  <label class="field">Nickname<input name="nickname" maxlength="32" value="${esc(d.nickname||'')}"></label>
  <label class="field">Ability<input name="ability" list="abilities" maxlength="48" value="${esc(d.ability||d.abilities?.[0]||'')}"><datalist id="abilities">${[...(d.abilities||[]),...customAbilities.map(a=>a.name)].map(a=>`<option value="${esc(a)}"></option>`).join('')}</datalist></label>
@@ -750,7 +771,7 @@ async function saveAssign(form){
  if(!draft&&!existing)throw Error('Fetch an official or custom species first.');
  const d=draft||existing;
  const ownerUid=String(f.get('ownerUid')||'');
- if(!trainers.some(x=>x.uid===ownerUid))throw Error('Choose an approved Trainer.');
+ if(!mayManageTrainer(ownerUid))throw Error('Choose an approved Trainer or authorized Pokémon requester.');
  const level=Number(f.get('level')),slot=Number(f.get('slot'));
  const maxHp=Number(f.get('maxHp')),currentHp=Number(f.get('currentHp'));
  const moves=registrationMoves(f);
