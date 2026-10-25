@@ -6,7 +6,7 @@ import { getFirestore, collection, doc, onSnapshot, setDoc, serverTimestamp } fr
 const GM_UID='ctBLgrVgkLOzUJYTyYgU9IwejYx1';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let ready=false,isGM=false,requests=[],permissions=[],feedback='Sign in with your GM Google account first.';
-let stopRequests=null,stopPermissions=null,firestore=null;
+let stopRequests=null,stopPermissions=null,stopRole=null,firestore=null;
 function count(){return requests.filter(r=>!permissions.find(p=>p.uid===r.uid)?.enabled).length}
 function render(){
   const root=document.getElementById('gm-approvals-root');
@@ -53,7 +53,8 @@ window.SantaraApprovals={render};
 function stopAll(){
  if(stopRequests)stopRequests();
  if(stopPermissions)stopPermissions();
- stopRequests=stopPermissions=null;requests=[];permissions=[];
+ if(stopRole)stopRole();
+ stopRequests=stopPermissions=stopRole=null;requests=[];permissions=[];
 }
 const c=window.SANTARA_FIREBASE_CONFIG;
 if(c && c.projectId && !c.projectId.includes('PASTE_')){
@@ -61,17 +62,28 @@ if(c && c.projectId && !c.projectId.includes('PASTE_')){
     const app=getApps().length?getApp():initializeApp(c);
     firestore=getFirestore(app);
     onAuthStateChanged(getAuth(app),user=>{
-      stopAll();isGM=Boolean(user&&user.uid===GM_UID);
-      if(!isGM){feedback='Please sign into the GM publishing panel.';render();return}
-      feedback='Listening for verified Trainer registrations…';render();
-      stopRequests=onSnapshot(collection(firestore,'santara_access_requests'),snapshot=>{
-        requests=snapshot.docs.map(d=>({uid:d.id,...d.data()}));
-        requests.sort((a,b)=>(a.email||'').localeCompare(b.email||''));
-        render();
-      },e=>{feedback='Could not load requests: '+e.message;render()});
-      stopPermissions=onSnapshot(collection(firestore,'santara_player_access'),snapshot=>{
-        permissions=snapshot.docs.map(d=>({uid:d.id,...d.data()}));render();
-      },e=>{feedback='Could not load approvals: '+e.message;render()});
+      stopAll();isGM=false;
+      const activate=()=>{
+        isGM=true;feedback='Listening for verified Trainer registrations…';render();
+        stopRequests=onSnapshot(collection(firestore,'santara_access_requests'),snapshot=>{
+          requests=snapshot.docs.map(d=>({uid:d.id,...d.data()}));
+          requests.sort((a,b)=>(a.email||'').localeCompare(b.email||''));
+          render();
+        },e=>{feedback='Could not load requests: '+e.message;render()});
+        stopPermissions=onSnapshot(collection(firestore,'santara_player_access'),snapshot=>{
+          permissions=snapshot.docs.map(d=>({uid:d.id,...d.data()}));render();
+        },e=>{feedback='Could not load approvals: '+e.message;render()});
+      };
+      if(!user){feedback='Sign in through the GM publishing panel.';render();return}
+      if(user.uid===GM_UID){activate();return}
+      if(!user.emailVerified){feedback='Verify your email before using the GM console.';render();return}
+      stopRole=onSnapshot(doc(firestore,'santara_gm_accounts',user.uid),snap=>{
+        const role=snap.exists()?snap.data():null;
+        const granted=role?.enabled===true&&role.email===user.email;
+        if(granted&&!isGM){activate();return}
+        if(!granted){if(isGM){stopRequests?.();stopPermissions?.();stopRequests=stopPermissions=null;requests=[];permissions=[]}
+          isGM=false;feedback='This account has not been granted GM permissions. Use Account Access.';render();}
+      },e=>{isGM=false;feedback='Could not verify GM role: '+e.message;render()});
     });
   }catch(e){feedback='Firebase setup error: '+e.message}
 }
