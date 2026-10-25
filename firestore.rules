@@ -267,6 +267,47 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time;
     }
 
+
+    // Trainer-submitted Pokémon requests. A player can propose a Pokémon,
+    // but only the GM can resolve a request and assign the real Pokémon.
+    match /santara_pokemon_requests/{requestId} {
+      allow get, list: if gm() ||
+        (approved() && resource.data.ownerUid == request.auth.uid);
+      allow create: if approved()
+        && request.resource.data.keys().hasOnly([
+          'ownerUid','speciesKey','speciesName','level','nickname',
+          'notes','status','createdAt','resolvedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'ownerUid','speciesKey','speciesName','level','nickname',
+          'notes','status','createdAt','resolvedAt'
+        ])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.speciesKey is string
+        && request.resource.data.speciesKey.size() > 0
+        && request.resource.data.speciesKey.size() <= 110
+        && request.resource.data.speciesName is string
+        && request.resource.data.speciesName.size() > 0
+        && request.resource.data.speciesName.size() <= 85
+        && request.resource.data.level is int
+        && request.resource.data.level >= 1
+        && request.resource.data.level <= 100
+        && request.resource.data.nickname is string
+        && request.resource.data.nickname.size() <= 32
+        && request.resource.data.notes is string
+        && request.resource.data.notes.size() <= 300
+        && request.resource.data.status == 'pending'
+        && request.resource.data.resolvedAt == null
+        && request.resource.data.createdAt == request.time;
+      allow update: if gm()
+        && resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status','resolvedAt'])
+        && request.resource.data.status in ['approved','rejected']
+        && request.resource.data.resolvedAt == request.time;
+      allow delete: if gm();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
