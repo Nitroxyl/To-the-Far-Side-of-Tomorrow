@@ -55,6 +55,11 @@ if (!bridge) {
         if (!currentUser) return;
         const bundle = bridge.publicBundle();
         const count = bundle.sites.length + bundle.requests.length + bundle.sightings.length;
+        const estimatedBytes = new TextEncoder().encode(JSON.stringify(bundle)).length;
+        if (estimatedBytes > 850000) {
+          status(`Publication is ${(estimatedBytes/1024).toFixed(0)} KB, too large for one Firestore document. Remove or reduce some uploaded images before publishing.`);
+          return;
+        }
         if (!confirm(`Publish ${count} player-safe entries to the shared Pokédex? This replaces the previous publication, including removing entries you have now unpublished.`)) return;
         publishButton.disabled = true;
         status(`Publishing ${count} entries…`);
