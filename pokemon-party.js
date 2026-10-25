@@ -1,9 +1,10 @@
 import {initializeApp,getApps,getApp} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
 import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,signInWithPopup,GoogleAuthProvider} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
-import {getFirestore,collection,doc,query,where,onSnapshot,setDoc,addDoc,deleteDoc,writeBatch,updateDoc,serverTimestamp} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
+import {getFirestore,collection,doc,query,where,onSnapshot,getDoc,setDoc,addDoc,deleteDoc,writeBatch,updateDoc,serverTimestamp} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
 import {statKeys,statLabels,validStats,maxHpV4Baseline,combatSummary,fromPokeApi,V52_TIERS} from './pokemon-math.js?v=v52-requests-20261025-2';
 import {TYPE_NAMES,initialUnlocks,megaCompatible,effectivePokemon} from './pokemon-gimmicks.js';
 import {TYPES,KEYS,unlockUI,libraryUI,editorUI,controlsUI} from './pokemon-gimmick-ui.js';
+import {SANTARA_CATALOG_GROUPS,santaraCatalogEntries} from './santara-catalog.js';
 
 const GM_UID='ctBLgrVgkLOzUJYTyYgU9IwejYx1';
 const GM_SITE=window.SANTARA_POKEMON_EDITION==='gm';
@@ -115,6 +116,47 @@ async function saveCatalog(form,isMove){
  if(i<0)list.push(record);else list[i]=record;
  say(name+' saved to your custom '+(isMove?'moves':'abilities')+' catalogue.');
  catalogReturn();
+}
+
+
+function santaraImporterUI(){
+ if(!GM_SITE)return '';
+ const lists={
+  santara_species_overrides:customs,
+  santara_mega_forms:megaForms,
+  santara_custom_moves:customMoves,
+  santara_custom_abilities:customAbilities
+ };
+ return '<section class="panel"><div class="toolbar"><h2>Import Santara custom content</h2><button class="btn" data-act="back">← Back</button></div>'+
+  '<p>These are the designs from our campaign notes. Import only missing Firestore records: existing entries, custom stats, abilities, and uploaded art will not be overwritten. This imports definitions, not Pokémon instances or Trainer unlocks.</p>'+
+  '<p class="hint">Important: custom species, moves and abilities are readable by approved Trainers. Mega form templates remain GM-only. Import story content only when you are ready to reveal it.</p>'+
+  SANTARA_CATALOG_GROUPS.map(group=>{
+   const entries=santaraCatalogEntries(group.id);
+   const missing=entries.filter(item=>!(lists[item.collection]||[]).some(x=>(x.slug||x.key)===item.id)).length;
+   return '<div class="mega-entry"><div><b>'+esc(group.label)+'</b><p class="hint">'+esc(group.description)+'</p><small>'+missing+' missing of '+entries.length+' preset definitions (estimated from loaded catalogues)</small></div>'+
+     '<button type="button" class="btn small" data-act="santara-import" data-group="'+esc(group.id)+'">Import missing</button></div>';
+  }).join('')+'</section>';
+}
+async function importSantaraGroup(group){
+ if(!GM_SITE||user?.uid!==GM_UID||!allowed)throw Error('GM authentication required.');
+ const preset=SANTARA_CATALOG_GROUPS.find(x=>x.id===group);
+ if(!preset)throw Error('Unknown content group.');
+ const entries=santaraCatalogEntries(group);
+ if(!confirm('Import missing definitions for '+preset.label+'? Existing Firestore entries will not be changed. Some definitions will be readable by approved Trainers.'))return;
+ say('Checking existing Santara definitions…');
+ // Read the current server state rather than trusting possibly stale onSnapshot arrays.
+ const checked=await Promise.all(entries.map(async item=>({
+  ...item,exists:(await getDoc(doc(store,item.collection,item.id))).exists()
+ })));
+ const missing=checked.filter(x=>!x.exists);
+ if(!missing.length){say('All '+entries.length+' definitions already exist. Nothing was changed.');render();return;}
+ const batch=writeBatch(store);
+ for(const item of missing)batch.set(doc(store,item.collection,item.id),{
+  ...item.data,updatedAt:serverTimestamp()
+ });
+ await batch.commit();
+ say('Imported '+missing.length+' missing '+preset.label+' definitions; skipped '+(entries.length-missing.length)+' existing records. Existing Pokémon and Mega snapshots were not modified.');
+ render();
 }
 
 function formSlug(value){return String(value||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,70);}
@@ -405,7 +447,7 @@ function listView(){
  const slots=Array.from({length:6},(_,i)=>active.find(m=>Number(m.slot)===i+1));
  return `<div class="panel">${roster()}${view==='party'?`<div class="poke-grid">${slots.map((m,i)=>m?card(m):`<div class="empty">Slot ${i+1}<br>Empty</div>`).join('')}</div>`:
  `<div class="poke-grid">${storage.length?storage.map(card).join(''):'<div class="empty">No Pokémon in storage.</div>'}</div>`}</div>
- ${GM_SITE?`<section class="panel"><h3>Custom Pokémon & forms</h3><p>Create custom species once, then select them when assigning a Pokémon. Official species import from PokéAPI instead.</p><div class="actions"><button class="btn" data-act="custom">+ Register custom species</button><button class="btn" data-act="define-move">+ Custom Move</button><button class="btn" data-act="define-ability">+ Custom Ability</button></div><p class="hint">${customs.length} custom species · ${customMoves.length} custom moves · ${customAbilities.length} custom abilities</p></section><section class="panel"><h3>V5.2 calculations</h3><p>Our V5.2 offense and defense multipliers are already included. You can override the table or set a fixed AC if needed.</p><button class="btn" data-act="rules">Edit battle rules</button><p class="hint">${battleRules?'Custom V5.2 settings loaded.':'Default V5.2 multipliers are active.'}</p></section>` :''}${gmMechanicsUI()}${requestsSection()}`;
+ ${GM_SITE?`<section class="panel"><h3>Custom Pokémon & forms</h3><p>Create custom species once, then select them when assigning a Pokémon. Official species import from PokéAPI instead.</p><div class="actions"><button class="btn" data-act="custom">+ Register custom species</button><button class="btn" data-act="santara-catalog">+ Import Santara Content</button><button class="btn" data-act="define-move">+ Custom Move</button><button class="btn" data-act="define-ability">+ Custom Ability</button></div><p class="hint">${customs.length} custom species · ${customMoves.length} custom moves · ${customAbilities.length} custom abilities</p></section><section class="panel"><h3>V5.2 calculations</h3><p>Our V5.2 offense and defense multipliers are already included. You can override the table or set a fixed AC if needed.</p><button class="btn" data-act="rules">Edit battle rules</button><p class="hint">${battleRules?'Custom V5.2 settings loaded.':'Default V5.2 multipliers are active.'}</p></section>` :''}${gmMechanicsUI()}${requestsSection()}`;
 }
 function detail(m){
  const shown=displayPokemon(m),s=shown.baseStats||{},d=combatSummary(shown,battleRules);
@@ -511,6 +553,7 @@ function render(){
  chip.textContent=GM_SITE?'GM authenticated':user.email||'Trainer';
  if(view==='assign'){root.innerHTML=gmForm();return}
  if(view==='custom'){root.innerHTML=customForm();return}
+ if(view==='santara-catalog'){root.innerHTML=santaraImporterUI();return}
  if(view==='mega-form'){root.innerHTML=editorUI(editingMega||{},statKeys,statLabels,option,esc);return}
  if(view==='custom-move'){root.innerHTML=catalogForm('move');return}
  if(view==='custom-ability'){root.innerHTML=catalogForm('ability');return}
@@ -632,6 +675,8 @@ root.addEventListener('click',async e=>{
   if(action==='review'&&GM_SITE){say('Loading requested species…');await reviewRequest(b.dataset.id)}
   if(action==='reject'&&GM_SITE)await rejectRequest(b.dataset.id)
   if(action==='custom'&&GM_SITE){view='custom';chosen='';render()}
+  if(action==='santara-catalog'&&GM_SITE){view='santara-catalog';chosen='';render()}
+  if(action==='santara-import'&&GM_SITE){busy=true;await importSantaraGroup(b.dataset.group)}
   if(action==='rules'&&GM_SITE){view='rules';chosen='';render()}
   if(action==='mega-new'&&GM_SITE){editingMega=null;megaImported=false;view='mega-form';render()}
   if(action==='mega-edit'&&GM_SITE){editingMega={...megaForms.find(m=>m.slug===b.dataset.id)};megaImported=editingMega.source==='official';view='mega-form';render()}
