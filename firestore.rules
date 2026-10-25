@@ -312,11 +312,23 @@ service cloud.firestore {
            d.megaForm.baseSpeciesKey == d.speciesKey))
         && d.updatedAt == request.time;
     }
+    // Repositioning a pre-V5.2 Pokémon must not require all later schema
+    // fields to exist. This exception is GM-only and strictly slot/timestamp.
+    function gmLegacySlotUpdate() {
+      return gm()
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['slot','updatedAt'])
+        && request.resource.data.slot is int
+        && request.resource.data.slot >= 0
+        && request.resource.data.slot <= 6
+        && request.resource.data.updatedAt == request.time;
+    }
     match /santara_pokemon/{pokemonId} {
       allow get, list: if gm() || (approved() && resource.data.ownerUid == request.auth.uid);
       allow create: if gm() && pokemonValid(request.resource.data);
       allow delete: if gm();
-      allow update: if gm() && pokemonValid(request.resource.data)
+      allow update: if (gm() && pokemonValid(request.resource.data))
+        || gmLegacySlotUpdate()
         || (approved() && resource.data.ownerUid == request.auth.uid
           && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
