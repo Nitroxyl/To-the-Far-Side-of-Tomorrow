@@ -695,7 +695,7 @@ function gmForm(){
  const defaultHp=validStats(d.baseStats)?maxHpV4Baseline(d.baseStats,level):'';
  return `<section class="panel"><div class="toolbar"><h2>${existing?'Edit Pokémon':'Assign Pokémon'}</h2><button class="btn" data-act="back">← Cancel</button></div>
  <form id="assign-form" class="form-grid">
- <label class="field full">Species / Form<input id="species-query" name="species" list="species-list" required placeholder="e.g. Riolu, Charizard, custom Mega Charizard Z" value="${esc(d.speciesName||'')}"><datalist id="species-list">${customs.map(x=>`<option value="${esc(x.name)}"></option>`).join('')}</datalist></label>
+ <label class="field full">Species / Form<input id="species-query" name="species" list="species-list" required placeholder="e.g. Charizard (regular form); pick Mega Charizard Z below" value="${esc(d.speciesName||'')}"><datalist id="species-list">${customs.map(x=>`<option value="${esc(x.name)}"></option>`).join('')}</datalist></label>
  <div class="actions"><button class="btn" data-act="lookup" type="button">Fetch stats from PokéAPI / custom list</button><span class="hint" id="species-source">${draft?esc(d.source||''):'Look up a species before saving.'}</span></div>
  <label class="field">Assign to Trainer<select name="ownerUid" required>${managedTrainers().map(t=>option(t.uid,trainerLabel(t.uid)+(t.authorizedRequester?' · authorized requester':''),d.ownerUid||ownerFilter)).join('')}</select></label>
  <label class="field">Level<input name="level" type="number" min="1" max="100" required value="${level}"></label>
@@ -861,7 +861,14 @@ async function saveAssign(form){
  if(activeRequestId){batch.update(doc(store,'santara_pokemon_requests',activeRequestId),{status:'approved',resolvedAt:serverTimestamp()});}
  if(existing)batch.set(doc(store,'santara_pokemon',existing.id),item);
  else batch.set(doc(collection(store,'santara_pokemon')),item);
- await batch.commit();
+ try{
+  await batch.commit();
+ }catch(err){
+  if(err?.code==='permission-denied'||/missing or insufficient permissions/i.test(err?.message||'')){
+   throw Error('Firebase denied this Pokémon assignment. Make sure the GM account has an active GM role and the latest Firestore rules are published. Legacy Pokémon now need rules that accept missing optional gimmick fields when party slots are swapped.');
+  }
+  throw err;
+ }
  say('Pokémon saved and synced to the Trainer account.');clearSelection();
 }
 async function saveTracking(form){
