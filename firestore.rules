@@ -408,6 +408,36 @@ service cloud.firestore {
       allow delete: if gm();
     }
 
+    // Public Trainer Card projection: only six party identities, not private battle state.
+    function publicSlotValid(v) {
+      return v == null || (
+        v is map
+        && v.keys().hasOnly(['name','species','level','artUrl','artData'])
+        && v.keys().hasAll(['name','species','level','artUrl','artData'])
+        && v.name is string && v.name.size() > 0 && v.name.size() <= 32
+        && v.species is string && v.species.size() > 0 && v.species.size() <= 85
+        && v.level is int && v.level >= 1 && v.level <= 100
+        && urlValid(v.artUrl) && imageValid(v.artData)
+      );
+    }
+    match /santara_public_parties/{uid} {
+      allow get, list: if member();
+      allow create, update: if (gm() || (approved() && request.auth.uid == uid))
+        && request.resource.data.keys().hasOnly(['ownerUid','slots','updatedAt'])
+        && request.resource.data.keys().hasAll(['ownerUid','slots','updatedAt'])
+        && request.resource.data.ownerUid == uid
+        && request.resource.data.slots is list
+        && request.resource.data.slots.size() == 6
+        && publicSlotValid(request.resource.data.slots[0])
+        && publicSlotValid(request.resource.data.slots[1])
+        && publicSlotValid(request.resource.data.slots[2])
+        && publicSlotValid(request.resource.data.slots[3])
+        && publicSlotValid(request.resource.data.slots[4])
+        && publicSlotValid(request.resource.data.slots[5])
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if gm();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
