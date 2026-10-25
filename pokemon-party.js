@@ -198,6 +198,7 @@ function artworkEditorUI(){
  '<p class="hint full">Choose either a file or URL. Uploaded files must be under 5 MB; the site automatically compresses them to the Firestore 150 KB image limit. The picture preview updates before saving.</p>'+
  '<label class="field full artwork-sync"><input type="checkbox" name="syncExisting" checked> Update previously assigned Pokémon that use the default artwork. Individually customized images will be preserved.</label>'+
  '<div class="actions full"><button class="btn primary" type="submit">Save artwork</button>'+
+ '<button type="button" class="btn" data-act="artwork-sync-current">Sync saved image</button>'+
  '<button type="button" class="btn danger" data-act="artwork-remove">Remove artwork</button></div>'+
  '</form></div></section>';
 }
@@ -216,11 +217,9 @@ async function updateArtworkRecord(next,syncExisting){
  const snap=await getDoc(ref);
  if(!snap.exists())throw Error('That custom form no longer exists. Return to the artwork library.');
  const old=snap.data();
- if(next.spriteData===String(old.spriteData||'')&&next.spriteUrl===String(old.spriteUrl||'')){
-  say('Artwork is already up to date.');return;
- }
- // Update only the image fields to preserve all registered stats, abilities and names.
- await updateDoc(ref,{spriteData:next.spriteData,spriteUrl:next.spriteUrl,updatedAt:serverTimestamp()});
+ const unchanged=next.spriteData===String(old.spriteData||'')&&next.spriteUrl===String(old.spriteUrl||'');
+ // Update only image fields; this also permits re-synchronizing default images after a partial failure.
+ if(!unchanged)await updateDoc(ref,{spriteData:next.spriteData,spriteUrl:next.spriteUrl,updatedAt:serverTimestamp()});
  const updates=syncExisting?artworkPropagation(selection.kind,selection.id,old,next,pokemon):[];
  let done=0;
  // Keep each batch safely below Firestore's 10 MiB request limit even for 150 KB art.
@@ -785,6 +784,11 @@ root.addEventListener('click',async e=>{
    artworkSelected=entry;view='artwork-edit';render();
   }
   if(action==='artwork-remove'&&GM_SITE){busy=true;await removeArtwork()}
+  if(action==='artwork-sync-current'&&GM_SITE){
+   const target=artworkFor(artworkSelected,customs,megaForms);
+   if(!target)throw Error('The custom form no longer exists.');
+   busy=true;await updateArtworkRecord({spriteData:target.spriteData||'',spriteUrl:target.spriteUrl||''},true);
+  }
   if(action==='santara-import'&&GM_SITE){busy=true;await importSantaraGroup(b.dataset.group)}
   if(action==='rules'&&GM_SITE){view='rules';chosen='';render()}
   if(action==='mega-new'&&GM_SITE){editingMega=null;megaImported=false;view='mega-form';render()}
