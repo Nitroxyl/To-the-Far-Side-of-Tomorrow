@@ -134,6 +134,139 @@ service cloud.firestore {
       allow delete: if gm() || (member() && request.auth.uid == uid);
     }
 
+
+    // Shared species templates. Only the GM can author new Santara custom forms.
+    function statsValid(s) {
+      return s is map
+        && s.keys().hasOnly(['hp','attack','defense','specialAttack','specialDefense','speed'])
+        && s.keys().hasAll(['hp','attack','defense','specialAttack','specialDefense','speed'])
+        && s.hp is int && s.hp >= 1 && s.hp <= 255
+        && s.attack is int && s.attack >= 1 && s.attack <= 255
+        && s.defense is int && s.defense >= 1 && s.defense <= 255
+        && s.specialAttack is int && s.specialAttack >= 1 && s.specialAttack <= 255
+        && s.specialDefense is int && s.specialDefense >= 1 && s.specialDefense <= 255
+        && s.speed is int && s.speed >= 1 && s.speed <= 255;
+    }
+    function imageValid(value) {
+      return value is string && value.size() <= 150000
+        && (value == '' || value.matches('^data:image/webp;base64,[A-Za-z0-9+/=]+
+      allow read, write: if false;
+    }
+  }
+}
+));
+    }
+    function urlValid(value) {
+      return value is string && value.size() <= 600
+        && (value == '' || value.matches('^https://.+
+      allow read, write: if false;
+    }
+  }
+}
+));
+    }
+    function shortList(items, limit) {
+      return items is list && items.size() <= limit;
+    }
+    function customValid(d) {
+      return d.keys().hasOnly([
+          'slug','name','baseStats','types','abilities','spriteUrl','spriteData','updatedAt'
+        ])
+        && d.keys().hasAll([
+          'slug','name','baseStats','types','abilities','spriteUrl','spriteData','updatedAt'
+        ])
+        && d.slug is string && d.slug.matches('^[a-z0-9-]{2,70}
+      allow read, write: if false;
+    }
+  }
+}
+)
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 65
+        && statsValid(d.baseStats)
+        && shortList(d.types,2) && d.types.size() > 0
+        && shortList(d.abilities,3)
+        && urlValid(d.spriteUrl) && imageValid(d.spriteData)
+        && d.updatedAt == request.time;
+    }
+    match /santara_species_overrides/{slug} {
+      allow get, list: if member();
+      allow create, update: if gm()
+        && customValid(request.resource.data)
+        && request.resource.data.slug == slug;
+      allow delete: if gm();
+    }
+
+    // GM controls species, base stats, levels, moves, abilities and ownership.
+    // Approved Trainers can only track their own HP, status, nickname, notes and party slot.
+    function pokemonValid(d) {
+      return d.keys().hasOnly([
+          'ownerUid','speciesKey','speciesName','source','baseStats','types','abilities',
+          'spriteUrl','spriteData','nickname','level','ability','maxHp','currentHp',
+          'status','slot','heldItem','moves','origin','notes','updatedAt'
+        ])
+        && d.keys().hasAll([
+          'ownerUid','speciesKey','speciesName','source','baseStats','types','abilities',
+          'spriteUrl','spriteData','nickname','level','ability','maxHp','currentHp',
+          'status','slot','heldItem','moves','origin','notes','updatedAt'
+        ])
+        && d.ownerUid is string && d.ownerUid.size() >= 10 && d.ownerUid.size() <= 128
+        && d.speciesKey is string && d.speciesKey.size() > 0 && d.speciesKey.size() <= 110
+        && d.speciesName is string && d.speciesName.size() > 0 && d.speciesName.size() <= 85
+        && d.source in ['official','custom']
+        && statsValid(d.baseStats)
+        && shortList(d.types,2) && d.types.size() > 0
+        && shortList(d.abilities,4)
+        && urlValid(d.spriteUrl) && imageValid(d.spriteData)
+        && d.nickname is string && d.nickname.size() <= 32
+        && d.level is int && d.level >= 1 && d.level <= 100
+        && d.ability is string && d.ability.size() <= 48
+        && d.maxHp is int && d.maxHp >= 1 && d.maxHp <= 3000
+        && d.currentHp is int && d.currentHp >= 0 && d.currentHp <= d.maxHp
+        && d.status in ['None','Burned','Poisoned','Badly poisoned','Paralyzed','Asleep','Frozen']
+        && d.slot is int && d.slot >= 0 && d.slot <= 6
+        && d.heldItem is string && d.heldItem.size() <= 80
+        && shortList(d.moves,4)
+        && d.origin is string && d.origin.size() <= 150
+        && d.notes is string && d.notes.size() <= 1000
+        && d.updatedAt == request.time;
+    }
+    match /santara_pokemon/{pokemonId} {
+      allow get, list: if gm() || (approved() && resource.data.ownerUid == request.auth.uid);
+      allow create: if gm() && pokemonValid(request.resource.data);
+      allow delete: if gm();
+      allow update: if gm() && pokemonValid(request.resource.data)
+        || (approved() && resource.data.ownerUid == request.auth.uid
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'currentHp','status','slot','nickname','notes','updatedAt'
+          ])
+          && pokemonValid(request.resource.data));
+    }
+
+
+
+    // The finalized V5.2 values are GM-configurable instead of guessing a table.
+    match /santara_battle_rules/v5_2 {
+      allow get: if member();
+      allow list, delete: if false;
+      allow create, update: if gm()
+        && request.resource.data.keys().hasOnly([
+          'universalAc','offenseBands','defenseBands','updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'universalAc','offenseBands','defenseBands','updatedAt'
+        ])
+        && (request.resource.data.universalAc == null
+          || (request.resource.data.universalAc is int
+            && request.resource.data.universalAc >= 1
+            && request.resource.data.universalAc <= 50))
+        && request.resource.data.offenseBands is list
+        && request.resource.data.offenseBands.size() <= 20
+        && request.resource.data.defenseBands is list
+        && request.resource.data.defenseBands.size() <= 20
+        && request.resource.data.updatedAt == request.time;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
