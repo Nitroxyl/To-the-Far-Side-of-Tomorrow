@@ -2,7 +2,7 @@
 // Only player-safe publication bundles are transferred; the GM database stays local.
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
 import { getFirestore, doc, onSnapshot, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
 
 const bridge = window.SantaraBridge;
 const isGM = bridge?.mode === 'gm';
@@ -14,7 +14,7 @@ const configured = config && ['apiKey', 'authDomain', 'projectId', 'appId'].ever
 const panel = document.createElement('aside');
 panel.id = 'santara-cloud-panel';
 panel.style.cssText = 'position:fixed;z-index:5;bottom:14px;right:14px;width:min(320px,calc(100vw - 28px));padding:12px 14px;background:#142735;color:#e5f4f4;border:1px solid #518b85;border-radius:13px;box-shadow:0 8px 30px #0008;font:13px/1.45 system-ui,sans-serif';
-panel.innerHTML = `<div style="font-weight:750;margin-bottom:4px">☁ ${isGM ? 'GM publishing' : 'Live Pokédex'} · Firestore</div><div id="cloud-status" role="status" aria-live="polite" style="color:#b4c9c9">Connecting…</div>${isGM ? '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:9px"><button id="cloud-signin" type="button">Sign in with Google</button><button id="cloud-publish" type="button" disabled>Publish visible records</button><button id="cloud-signout" type="button" hidden>Sign out</button></div>' : ''}`;
+panel.innerHTML = `<div style="font-weight:750;margin-bottom:4px">☁ ${isGM ? 'GM publishing' : 'Live Pokédex'} · Firestore</div><div id="cloud-status" role="status" aria-live="polite" style="color:#b4c9c9">Connecting…</div>${isGM ? '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:9px"><button id="cloud-signin" type="button">Sign in with Google</button><button id="cloud-email-toggle" type="button">Email login</button><button id="cloud-publish" type="button" disabled>Publish visible records</button><button id="cloud-signout" type="button" hidden>Sign out</button></div><form id="cloud-email-form" hidden style="display:none;margin-top:10px"><input name="email" type="email" required placeholder="Email" style="box-sizing:border-box;width:100%;margin-bottom:5px"><input name="password" type="password" required placeholder="Password" style="box-sizing:border-box;width:100%;margin-bottom:5px"><button type="submit">Sign in</button></form><a href="./account-access.html" style="display:block;margin-top:6px;color:#9de9d1">Check UID / GM permissions</a>' : ''}`;
 document.body.append(panel);
 for (const button of panel.querySelectorAll('button')) {
   button.style.cssText = 'background:#22605e;border:1px solid #68b8a9;border-radius:7px;color:white;padding:6px 9px;cursor:pointer';
@@ -35,12 +35,30 @@ if (!bridge) {
       const signInButton = panel.querySelector('#cloud-signin');
       const publishButton = panel.querySelector('#cloud-publish');
       const signOutButton = panel.querySelector('#cloud-signout');
+      const emailButton=panel.querySelector('#cloud-email-toggle');
+      const emailForm=panel.querySelector('#cloud-email-form');
+      emailButton.addEventListener('click',()=>{
+        const expand=emailForm.hidden;
+        emailForm.hidden=!expand;
+        emailForm.style.display=expand?'block':'none';
+      });
+      emailForm.addEventListener('submit',async event=>{
+        event.preventDefault();
+        if(!emailForm.reportValidity())return;
+        const f=new FormData(emailForm);
+        try{
+         await signInWithEmailAndPassword(auth,String(f.get('email')||'').trim(),String(f.get('password')||''));
+         emailForm.reset();emailForm.hidden=true;emailForm.style.display='none';
+        }catch(error){status('Email login failed: '+error.message)}
+      });
       const ROOT_UID='ctBLgrVgkLOzUJYTyYgU9IwejYx1';
       let currentUser=null,roleAllowed=false,stopRole=null;
       onAuthStateChanged(auth,user=>{
         stopRole?.();stopRole=null;
         currentUser=user;roleAllowed=false;
         signInButton.hidden=Boolean(user);
+        emailButton.hidden=Boolean(user);
+        if(user){emailForm.hidden=true;emailForm.style.display='none'}
         signOutButton.hidden=!user;
         publishButton.disabled=true;
         if(!user){status('Sign in with an authorized GM account to publish.');return}
