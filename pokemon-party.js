@@ -4,6 +4,7 @@ import {getFirestore,collection,doc,query,where,onSnapshot,getDoc,setDoc,addDoc,
 import {statKeys,statLabels,validStats,maxHpV4Baseline,combatSummary,fromPokeApi,V52_TIERS} from './pokemon-math.js?v=v52-requests-20261025-2';
 import {TYPE_NAMES,initialUnlocks,megaCompatible,effectivePokemon} from './pokemon-gimmicks.js';
 import {TYPES,KEYS,unlockUI,libraryUI,editorUI,controlsUI} from './pokemon-gimmick-ui.js';
+import {discoverOfficialMegas,mergeMegaOptions} from './pokemon-official-megas.js';
 import {publicPartySlots,partySignature} from './pokemon-public-party.js';
 import {SANTARA_CATALOG_GROUPS,santaraCatalogEntries} from './santara-catalog.js';
 import {artworkEntries,artworkFor,artworkPropagation} from './pokemon-artwork.js';
@@ -25,6 +26,7 @@ const apiCache=new Map(),moveCache=new Map();
 let app,auth,store,user=null,allowed=false,stopAccess=null,stopPokemon=null,stopApprovals=null,stopCustoms=null,stopRequests=null,stopCards=null,stopMoves=null,stopAbilities=null,stopGimmicks=null,stopMegaForms=null,stopRole=null;
 let editingCustom=null,editingCatalog=null,originLibrary=false,libraryKind='all',librarySearch='';
 let roleAllowed=false,accessApproved=false;
+const officialMegaCache=new Map(),officialMegaPending=new Map();
 let pokemon=[],trainers=[],trainerCards=[],customs=[],customMoves=[],customAbilities=[],requests=[],megaForms=[],trainerUnlocks={},playerUnlocks=initialUnlocks(),editingMega=null,megaImported=false,battleRules=null,stopRules=null,view='party',chosen='',ownerFilter='',editingId='',draft=null,requestDraft=null,activeRequestId='',returnToAssign=false,collectionReady=false,collectionError='',moveInfo={},busy=false,artworkKind='all',artworkQuery='',artworkSelected=null;
 
 document.getElementById('edition-name').textContent=GM_SITE?'GM CONSOLE / TEAM MANAGEMENT':'POKÉDEX / TRAINER COLLECTION';
@@ -40,10 +42,16 @@ function trainerLabel(uid){
  const card=trainerCards.find(c=>c.uid===uid);
  const name=cap(card?.trainerName,32);
  if(name && name.toLowerCase()!=='new trainer')return name;
+ if(GM_SITE&&uid===user?.uid)return 'My GM account';
  return `${TRAINER_FALLBACK} #${String(uid).slice(0,6)}`;
 }
 function managedTrainers(){
  const all=new Map(trainers.map(t=>[t.uid,t]));
+ // A GM's own verified Firebase UID is a valid assignment target even
+ // without an ordinary Trainer approval record or pending Pokémon request.
+ if(GM_SITE&&roleAllowed&&user?.uid&&!all.has(user.uid)){
+  all.set(user.uid,{uid:user.uid,currentGm:true});
+ }
  // The Firestore create rule verifies each requester has Trainer access or
  // an authorized GM role. Retain those identities for later editing, even
  // if they do not have an ordinary Trainer approval document.
@@ -287,7 +295,47 @@ function gmMechanicsUI(){
  return unlockUI(g,trainerLabel(ownerFilter),esc)+libraryUI(megaForms,esc);
 }
 function megaChoiceFor(mon){
- return megaForms.filter(f=>String(f.baseSpeciesKey).toLowerCase()===String(mon?.speciesKey||'').toLowerCase());
+ const key=String(mon?.speciesKey||'').toLowerCase();
+ const saved=megaForms.filter(f=>String(f.baseSpeciesKey).toLowerCase()===key);
+ const official=officialMegaCache.get(key)||[];
+ const all=mergeMegaOptions(official,saved);
+ // Also retain any previously assigned form even if its registry entry was removed.
+ if(mon?.megaForm?.slug&&!all.some(x=>x.slug===mon.megaForm.slug)){
+  all.push(mon.megaForm);
+ }
+ return all;
+}
+function updateMegaSelector(mon){
+ const form=document.getElementById('assign-form');
+ if(!form||view!=='assign')return;
+ const select=form.elements.megaSlug;
+ if(!select)return;
+ const key=String(mon?.speciesKey||'').toLowerCase();
+ if(String((draft||pokemon.find(x=>x.id===editingId)||{}).speciesKey||'').toLowerCase()!==key)return;
+ const active=select.value||mon?.megaForm?.slug||'';
+ const entries=megaChoiceFor(mon);
+ select.innerHTML=option('','No Mega assigned',active)+entries.map(x=>option(x.slug,x.name+(x.source==='official'?' (official)':' (Santara/custom)'),active)).join('');
+ const status=document.getElementById('mega-availability');
+ if(status)status.textContent=entries.length
+  ?entries.length+' Mega form(s) available. Official forms load automatically; GM-defined forms override matching official ones.'
+  :'No saved or official Mega forms found for this species.';
+}
+async function refreshMegaChoices(mon){
+ if(!GM_SITE||!mon?.speciesKey||mon.source==='custom')return;
+ const key=String(mon.speciesKey).toLowerCase();
+ if(officialMegaCache.has(key)){updateMegaSelector(mon);return}
+ if(!officialMegaPending.has(key)){
+  officialMegaPending.set(key,discoverOfficialMegas(key)
+   .then(forms=>{officialMegaCache.set(key,forms);return forms})
+   .finally(()=>officialMegaPending.delete(key)));
+ }
+ try{
+  await officialMegaPending.get(key);
+  updateMegaSelector(mon);
+ }catch(error){
+  const status=document.getElementById('mega-availability');
+  if(status)status.textContent='Official Mega lookup unavailable: '+error.message+'. Saved Santara forms remain selectable.';
+ }
 }
 async function saveUnlocks(form){
  if(!GM_SITE||!ownerFilter||!mayManageTrainer(ownerFilter))throw Error('Select an approved Trainer or an authorized Pokémon requester.');
@@ -425,6 +473,7 @@ function guard(){
 }
 function unlocks(uid){return GM_SITE?trainerUnlocks[uid]||initialUnlocks():playerUnlocks;}
 function connect(){
+ if(GM_SITE&&user?.uid&&!ownerFilter)ownerFilter=user.uid;
  stopGimmicks=onSnapshot(GM_SITE?collection(store,'santara_trainer_gimmicks'):doc(store,'santara_trainer_gimmicks',user.uid),snap=>{
    if(GM_SITE)trainerUnlocks=Object.fromEntries(snap.docs.map(d=>[d.id,d.data()]));
    else playerUnlocks=snap.exists()?snap.data():initialUnlocks();
@@ -450,7 +499,7 @@ function connect(){
    stopApprovals=onSnapshot(collection(store,'santara_player_access'),snapshot=>{
      trainers=snapshot.docs.map(d=>({uid:d.id,...d.data()})).filter(x=>x.enabled);
      publishVisibleParties();
-     if(!ownerFilter&&trainers.length)ownerFilter=trainers[0].uid;
+     if(!ownerFilter)ownerFilter=user?.uid||trainers[0]?.uid||'';
      render();
    },fail);
    stopCards=onSnapshot(collection(store,'santara_trainer_cards'),snapshot=>{
@@ -657,7 +706,7 @@ function gmForm(){
  <label class="field">Party slot<select name="slot">${Array.from({length:7},(_,i)=>option(i,i===0?'Storage':`Slot ${i}`,d.slot??0)).join('')}</select></label>
  <label class="field">Tera Type<select name="teraType">${TYPES.map(t=>option(t,t[0].toUpperCase()+t.slice(1),d.teraType||d.types?.[0]||'normal')).join('')}</select></label>
  <label class="field full">Mega Evolution form<select name="megaSlug">${option('','No Mega assigned',d.megaForm?.slug||'')}${megaChoiceFor(d).map(f=>option(f.slug,f.name,d.megaForm?.slug||'')).join('')}</select>
- <span class="hint">Register an official or custom Mega form in the library first. Only forms linked to this species are available.</span></label>
+ <span class="hint">Official Mega forms are discovered automatically from PokéAPI. Santara custom and reworked Megas appear alongside them.</span><span class="hint" id="mega-availability" aria-live="polite">Looking up official Mega forms…</span></label>
  <label class="field">Held item<input name="heldItem" maxlength="80" value="${esc(d.heldItem||'')}"></label>
  <div class="field full"><span class="eyebrow">Four move slots</span><p class="hint">Choose one move per slot. Each field searches the official learnset and your saved custom moves.</p>
  <div class="move-fields">${Array.from({length:4},(_,i)=>`<label class="field">Move ${i+1}<input name="move${i+1}" maxlength="48" list="known-moves" placeholder="Search or type a move" value="${esc((d.moves||[])[i]||'')}"></label>`).join('')}</div>
@@ -716,7 +765,12 @@ function render(){
  if(!allowed)return guard();
  const chip=document.getElementById('user-chip');
  chip.textContent=GM_SITE?'GM authenticated':user.email||'Trainer';
- if(view==='assign'){root.innerHTML=gmForm();return}
+ if(view==='assign'){
+  root.innerHTML=gmForm();
+  const current=draft||pokemon.find(x=>x.id===editingId);
+  if(current?.speciesKey)void refreshMegaChoices(current);
+  return;
+ }
  if(view==='custom'){root.innerHTML=customForm();return}
  if(view==='custom-library'){root.innerHTML=customContentLibraryUI({species:customs,megas:megaForms,moves:customMoves,abilities:customAbilities,category:libraryKind,search:librarySearch,esc});return}
  if(view==='santara-catalog'){root.innerHTML=santaraImporterUI();return}
@@ -778,7 +832,7 @@ async function saveAssign(form){
  const teraType=String(f.get('teraType')||d.teraType||d.types?.[0]||'normal');
  if(!TYPES.includes(teraType))throw Error('Choose a valid Tera type.');
  const megaSlug=String(f.get('megaSlug')||'');
- const selectedMega=megaSlug?megaForms.find(x=>x.slug===megaSlug):null;
+ const selectedMega=megaSlug?megaChoiceFor(d).find(x=>x.slug===megaSlug):null;
  if(megaSlug&&(!selectedMega||!megaCompatible(d,selectedMega)))throw Error('Selected Mega does not match the regular species.');
  const megaForm=selectedMega?{
   slug:selectedMega.slug,name:selectedMega.name,baseSpeciesKey:selectedMega.baseSpeciesKey,
