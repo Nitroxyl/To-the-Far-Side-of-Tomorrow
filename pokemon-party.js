@@ -447,7 +447,7 @@ function connect(){
    customMoves=snapshot.docs.map(d=>({...d.data(),slug:d.id}));for(const m of customMoves){const key=m.name.toLowerCase().trim().replace(/\s+/g,'-');moveCache.delete(key)}if(chosen){lookupMoves(pokemon.find(p=>p.id===chosen)?.moves||[]).then(render)}else if(view==='party'||view==='storage'||view==='custom-library')render();
  },e=>console.warn('Custom moves cannot load:',e.message));
  stopAbilities=onSnapshot(collection(store,'santara_custom_abilities'),snapshot=>{
-   customAbilities=snapshot.docs.map(d=>({...d.data(),slug:d.id}));if(view==='party'||view==='storage'||chosen)render();
+   customAbilities=snapshot.docs.map(d=>({...d.data(),slug:d.id}));if(view==='party'||view==='storage'||view==='custom-library'||chosen)render();
  },e=>console.warn('Custom abilities cannot load:',e.message));
  stopCustoms=onSnapshot(collection(store,'santara_species_overrides'),snapshot=>{
      customs=snapshot.docs.map(d=>({key:d.id,...d.data()})).sort((a,b)=>a.name.localeCompare(b.name));
@@ -809,7 +809,7 @@ root.addEventListener('click',async e=>{
  try{
   if(action==='party'||action==='storage'){chosen='';view=action;render()}
   if(action==='show')await selectMon(b.dataset.id);
-  if(action==='back')clearSelection();
+  if(action==='back'){if(GM_SITE&&originLibrary){editingCustom=null;editingCatalog=null;editingMega=null;originLibrary=false;view='custom-library';render()}else clearSelection()}
   if(action==='catalog-back'&&GM_SITE)catalogReturn();
   if((action==='define-move'||action==='define-ability')&&GM_SITE){
     returnToAssign=view==='assign';if(returnToAssign)copyAssignmentDraft();
@@ -837,7 +837,9 @@ root.addEventListener('click',async e=>{
    if(!entry)throw Error('Custom content not found');
    const references=pokemon.filter(m=>kind==='species'?m.speciesKey==='custom:'+id:kind==='mega'?m.megaForm?.slug===id:kind==='move'?m.moves?.some(x=>x.toLowerCase()===entry.name.toLowerCase()):m.ability?.toLowerCase()===entry.name.toLowerCase()).length;
    if(confirm('Delete '+entry.name+' from the '+kind+' library? '+(references?references+' assigned Pokémon reference it. Existing Pokémon will NOT be deleted, but linked definitions may no longer display.':'No assigned Pokémon references found.')+' This cannot be undone.')){
-    busy=true;await deleteDoc(doc(store,lookup[kind][1],id));say(entry.name+' removed from the custom library. Existing Pokémon have not been deleted.');
+    busy=true;await deleteDoc(doc(store,lookup[kind][1],id));
+    const targetList=lookup[kind][0],pos=targetList.findIndex(x=>x.slug===id);if(pos>=0)targetList.splice(pos,1);
+    render();say(entry.name+' removed from the custom library. Existing Pokémon have not been deleted.');
    }
   }
   if(action==='custom'&&GM_SITE){editingCustom=null;originLibrary=false;view='custom';chosen='';render()}
