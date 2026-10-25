@@ -232,7 +232,8 @@ service cloud.firestore {
     }
     match /santara_pokemon/{pokemonId} {
       allow get, list: if gm() || (approved() && resource.data.ownerUid == request.auth.uid);
-      allow create, delete: if gm() && (request.method == 'delete' || pokemonValid(request.resource.data));
+      allow create: if gm() && pokemonValid(request.resource.data);
+      allow delete: if gm();
       allow update: if gm() && pokemonValid(request.resource.data)
         || (approved() && resource.data.ownerUid == request.auth.uid
           && request.resource.data.ownerUid == resource.data.ownerUid
@@ -242,6 +243,29 @@ service cloud.firestore {
           && pokemonValid(request.resource.data));
     }
 
+
+
+    // The finalized V5.2 values are GM-configurable instead of guessing a table.
+    match /santara_battle_rules/v5_2 {
+      allow get: if member();
+      allow list, delete: if false;
+      allow create, update: if gm()
+        && request.resource.data.keys().hasOnly([
+          'universalAc','offenseBands','defenseBands','updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'universalAc','offenseBands','defenseBands','updatedAt'
+        ])
+        && (request.resource.data.universalAc == null
+          || (request.resource.data.universalAc is int
+            && request.resource.data.universalAc >= 1
+            && request.resource.data.universalAc <= 50))
+        && request.resource.data.offenseBands is list
+        && request.resource.data.offenseBands.size() <= 20
+        && request.resource.data.defenseBands is list
+        && request.resource.data.defenseBands.size() <= 20
+        && request.resource.data.updatedAt == request.time;
+    }
 
     match /{document=**} {
       allow read, write: if false;
