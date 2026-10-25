@@ -367,7 +367,9 @@ service cloud.firestore {
     match /santara_pokemon_requests/{requestId} {
       allow get, list: if gm() ||
         (approved() && resource.data.ownerUid == request.auth.uid);
-      allow create: if approved()
+      // GM status also grants Trainer-level request eligibility.
+      // This covers legacy root/delegated GM accounts without approval documents.
+      allow create: if member()
         && request.resource.data.keys().hasOnly([
           'ownerUid','speciesKey','speciesName','level','nickname',
           'notes','status','createdAt','resolvedAt'
