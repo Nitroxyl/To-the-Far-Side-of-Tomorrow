@@ -1,9 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function gm() {
+    // Immutable founding GM is the root administrator. Additional verified
+    // accounts are granted by the root through a UID + verified-email record.
+    function rootGm() {
       return request.auth != null
         && request.auth.uid == 'ctBLgrVgkLOzUJYTyYgU9IwejYx1';
+    }
+    function gm() {
+      return rootGm() || (
+        request.auth != null
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/santara_gm_accounts/$(request.auth.uid))
+        && get(/databases/$(database)/documents/santara_gm_accounts/$(request.auth.uid)).data.enabled == true
+        && get(/databases/$(database)/documents/santara_gm_accounts/$(request.auth.uid)).data.email == request.auth.token.email
+      );
     }
     function verified() {
       return request.auth != null
@@ -16,6 +27,24 @@ service cloud.firestore {
     }
     function member() {
       return gm() || approved();
+    }
+
+    // A verified legacy account may request access using its existing UID.
+    // ONLY the immutable root GM can grant new GM accounts.
+    match /santara_gm_accounts/{uid} {
+      allow get: if rootGm() || (verified() && request.auth.uid == uid);
+      allow list: if rootGm();
+      allow create, update: if rootGm()
+        && uid != 'ctBLgrVgkLOzUJYTyYgU9IwejYx1'
+        && request.resource.data.keys().hasOnly(['email','enabled','grantedAt'])
+        && request.resource.data.keys().hasAll(['email','enabled','grantedAt'])
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 320
+        && request.resource.data.enabled is bool
+        && request.resource.data.grantedAt == request.time
+        && exists(/databases/$(database)/documents/santara_access_requests/$(uid))
+        && get(/databases/$(database)/documents/santara_access_requests/$(uid)).data.email == request.resource.data.email;
+      allow delete: if rootGm();
     }
 
     // GM uploads only a public snapshot; verified, approved Trainers can read it.
