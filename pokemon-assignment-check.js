@@ -28,7 +28,7 @@ export function assignmentProblems(d){
  'spriteUrl','spriteData','nickname','level','ability','maxHp','currentHp',
  'status','slot','heldItem','moves','origin','notes','updatedAt',
  'teraType','megaForm','megaActive','teraActive','zUsed','dynamaxTurns','dynamaxUsed'];
- const core=expected.slice(0,22);
+ const core=expected.slice(0,21);
  for(const k of core)if(!own(d,k))errors.push('Missing '+k);
  for(const k of Object.keys(d))if(!expected.includes(k))errors.push('Unexpected field: '+k);
  if(!text(d.ownerUid,128,10))errors.push('Trainer UID must be 10–128 characters');
