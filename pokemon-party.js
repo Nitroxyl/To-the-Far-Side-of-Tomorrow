@@ -5,6 +5,7 @@ import {statKeys,statLabels,validStats,maxHpV4Baseline,combatSummary,fromPokeApi
 import {TYPE_NAMES,initialUnlocks,megaCompatible,effectivePokemon} from './pokemon-gimmicks.js';
 import {TYPES,KEYS,unlockUI,libraryUI,editorUI,controlsUI} from './pokemon-gimmick-ui.js';
 import {SANTARA_CATALOG_GROUPS,santaraCatalogEntries} from './santara-catalog.js';
+import {artworkEntries,artworkFor,artworkPropagation} from './pokemon-artwork.js';
 
 const GM_UID='ctBLgrVgkLOzUJYTyYgU9IwejYx1';
 const GM_SITE=window.SANTARA_POKEMON_EDITION==='gm';
@@ -20,7 +21,7 @@ const statuses=['None','Burned','Poisoned','Badly poisoned','Paralyzed','Asleep'
 const STAT_NAMES=['HP','Atk','Def','SpA','SpD','Spe'];
 const apiCache=new Map(),moveCache=new Map();
 let app,auth,store,user=null,allowed=false,stopAccess=null,stopPokemon=null,stopApprovals=null,stopCustoms=null,stopRequests=null,stopCards=null,stopMoves=null,stopAbilities=null,stopGimmicks=null,stopMegaForms=null;
-let pokemon=[],trainers=[],trainerCards=[],customs=[],customMoves=[],customAbilities=[],requests=[],megaForms=[],trainerUnlocks={},playerUnlocks=initialUnlocks(),editingMega=null,megaImported=false,battleRules=null,stopRules=null,view='party',chosen='',ownerFilter='',editingId='',draft=null,requestDraft=null,activeRequestId='',returnToAssign=false,collectionReady=false,collectionError='',moveInfo={},busy=false;
+let pokemon=[],trainers=[],trainerCards=[],customs=[],customMoves=[],customAbilities=[],requests=[],megaForms=[],trainerUnlocks={},playerUnlocks=initialUnlocks(),editingMega=null,megaImported=false,battleRules=null,stopRules=null,view='party',chosen='',ownerFilter='',editingId='',draft=null,requestDraft=null,activeRequestId='',returnToAssign=false,collectionReady=false,collectionError='',moveInfo={},busy=false,artworkKind='all',artworkQuery='',artworkSelected=null;
 
 document.getElementById('edition-name').textContent=GM_SITE?'GM CONSOLE / TEAM MANAGEMENT':'POKÉDEX / TRAINER COLLECTION';
 document.getElementById('page-title').innerHTML=GM_SITE?'Trainer Pokémon<span class="accent">.</span>':'My Pokémon<span class="accent">.</span>';
@@ -157,6 +158,104 @@ async function importSantaraGroup(group){
  await batch.commit();
  say('Imported '+missing.length+' missing '+preset.label+' definitions; skipped '+(entries.length-missing.length)+' existing records. Existing Pokémon and Mega snapshots were not modified.');
  render();
+}
+
+
+function artworkImage(item){
+ const src=safeImageData(item?.spriteData)||safeUrl(item?.spriteUrl);
+ return src?'<img src="'+esc(src)+'" alt="'+esc(item?.name||'Pokémon artwork')+'" loading="lazy" onerror="this.style.visibility=\'hidden\'">':
+  '<div class="artwork-empty">◈<small>No artwork</small></div>';
+}
+function artworkTiles(){
+ return artworkEntries(customs,megaForms).filter(x=>(artworkKind==='all'||x.kind===artworkKind)&&
+   x.name.toLowerCase().includes(artworkQuery.toLowerCase())).map(item=>
+  '<button class="artwork-card" type="button" data-act="artwork-edit" data-kind="'+esc(item.kind)+'" data-id="'+esc(item.id)+'">'+
+  '<span class="artwork-card-image">'+artworkImage(item)+'</span>'+
+  '<span class="artwork-card-label"><b>'+esc(item.name)+'</b><small>'+(item.kind==='mega'?'Mega Evolution':'Custom species')+'</small></span></button>'
+ ).join('')||'<p class="hint">No matching Pokémon. Try another search or import its custom definition first.</p>';
+}
+function artworkLibraryUI(){
+ if(!GM_SITE)return '';
+ const count=artworkEntries(customs,megaForms).length;
+ return '<section class="panel"><div class="toolbar"><h2>Pokémon artwork library</h2><button type="button" class="btn" data-act="back">← Back to Pokémon</button></div>'+
+ '<p>Upload images for any registered Santara custom species or Mega Evolution. The original stats and abilities remain unchanged. PNG, JPG and WebP are converted to compact WebP images while preserving transparency.</p>'+
+ '<div class="artwork-toolbar"><label class="field">Filter<select id="artwork-kind-filter">'+
+ option('all','All ('+count+')',artworkKind)+option('species','Custom species ('+customs.length+')',artworkKind)+
+ option('mega','Mega Evolutions ('+megaForms.length+')',artworkKind)+'</select></label>'+
+ '<label class="field artwork-search">Search<input id="artwork-search" type="search" value="'+esc(artworkQuery)+'" placeholder="Find a custom Pokémon…"></label></div>'+
+ '<div id="artwork-gallery" class="artwork-gallery">'+artworkTiles()+'</div></section>';
+}
+function artworkEditorUI(){
+ if(!GM_SITE)return '';
+ const item=artworkFor(artworkSelected,customs,megaForms);
+ if(!item)return '<section class="panel"><p>That registered form could not be found.</p><button class="btn" data-act="artwork-library">Back to library</button></section>';
+ return '<section class="panel"><div class="toolbar"><h2>Artwork · '+esc(item.name)+'</h2><button class="btn" type="button" data-act="artwork-library">← Library</button></div>'+
+ '<div class="artwork-editor"><div id="artwork-preview" class="artwork-large-preview">'+artworkImage(item)+'</div>'+
+ '<form id="artwork-form" class="form-grid">'+
+ '<p class="hint full">Edit only the artwork. This will not overwrite the species typing, base stats, ability or Mega definitions.</p>'+
+ '<label class="field full">Upload image from your computer<input type="file" name="artwork-upload" accept="image/png,image/jpeg,image/webp"></label>'+
+ '<label class="field full">Or paste an HTTPS image URL<input type="url" name="artwork-url" placeholder="https://example.com/artwork.png"></label>'+
+ '<p class="hint full">Choose either a file or URL. Uploaded files must be under 5 MB; the site automatically compresses them to the Firestore 150 KB image limit. The picture preview updates before saving.</p>'+
+ '<label class="field full artwork-sync"><input type="checkbox" name="syncExisting" checked> Update previously assigned Pokémon that use the default artwork. Individually customized images will be preserved.</label>'+
+ '<div class="actions full"><button class="btn primary" type="submit">Save artwork</button>'+
+ '<button type="button" class="btn" data-act="artwork-sync-current">Sync saved image</button>'+
+ '<button type="button" class="btn danger" data-act="artwork-remove">Remove artwork</button></div>'+
+ '</form></div></section>';
+}
+function artworkPreview(src,name){
+ const preview=document.getElementById('artwork-preview');
+ if(!preview)return;
+ preview.innerHTML=src?'<img src="'+esc(src)+'" alt="'+esc(name)+'" onerror="this.style.visibility=\'hidden\'">':
+  '<div class="artwork-empty">◈<small>No artwork</small></div>';
+}
+async function updateArtworkRecord(next,syncExisting){
+ if(!GM_SITE||user?.uid!==GM_UID||!allowed)throw Error('Only the GM can change custom artwork.');
+ const selection=artworkSelected;
+ if(!selection||!['species','mega'].includes(selection.kind))throw Error('Select an artwork entry.');
+ const path=selection.kind==='mega'?'santara_mega_forms':'santara_species_overrides';
+ const ref=doc(store,path,selection.id);
+ const snap=await getDoc(ref);
+ if(!snap.exists())throw Error('That custom form no longer exists. Return to the artwork library.');
+ const old=snap.data();
+ const unchanged=next.spriteData===String(old.spriteData||'')&&next.spriteUrl===String(old.spriteUrl||'');
+ // Update only image fields; this also permits re-synchronizing default images after a partial failure.
+ if(!unchanged)await updateDoc(ref,{spriteData:next.spriteData,spriteUrl:next.spriteUrl,updatedAt:serverTimestamp()});
+ const updates=syncExisting?artworkPropagation(selection.kind,selection.id,old,next,pokemon):[];
+ let done=0;
+ // Keep each batch safely below Firestore's 10 MiB request limit even for 150 KB art.
+ for(let i=0;i<updates.length;i+=20){
+  const group=updates.slice(i,i+20);
+  const batch=writeBatch(store);
+  for(const item of group)batch.update(doc(store,'santara_pokemon',item.id),{
+   ...item.patch,updatedAt:serverTimestamp()
+  });
+  try{await batch.commit();done+=group.length}
+  catch(e){
+   throw Error('The library artwork was saved, but only '+done+' of '+updates.length+
+    ' assigned Pokémon were updated. You can refresh affected Pokémon through their GM editor. '+(e?.message||e));
+  }
+ }
+ say('Artwork saved for '+old.name+'. '+(syncExisting?
+  done+' existing assigned Pokémon record(s) synchronized; personal artwork was left unchanged.':
+  'Existing assigned Pokémon were left unchanged.'));
+ view='artwork-library';artworkSelected=null;render();
+}
+async function saveArtwork(form){
+ const data=new FormData(form);
+ const file=data.get('artwork-upload');
+ const url=String(data.get('artwork-url')||'').trim();
+ if(file?.size&&url)throw Error('Choose either a file or a URL, not both.');
+ if(!file?.size&&!url)throw Error('Choose a PNG/JPG/WebP file or provide an HTTPS artwork URL.');
+ if(url&&(!/^https:\/\/.+$/.test(url)||url.length>600))throw Error('Use an HTTPS image URL up to 600 characters.');
+ const next=file?.size?{spriteData:await imgToWebp(file),spriteUrl:''}:{spriteData:'',spriteUrl:url};
+ await updateArtworkRecord(next,data.has('syncExisting'));
+}
+async function removeArtwork(){
+ const item=artworkFor(artworkSelected,customs,megaForms);
+ if(!item)throw Error('The custom form no longer exists.');
+ if(!confirm('Remove the registered artwork for '+item.name+'? Matching inherited images on existing Pokémon will also be cleared if synchronization is selected.'))return;
+ const form=document.getElementById('artwork-form');
+ await updateArtworkRecord({spriteData:'',spriteUrl:''},Boolean(form?.elements.syncExisting?.checked));
 }
 
 function formSlug(value){return String(value||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,70);}
@@ -447,7 +546,7 @@ function listView(){
  const slots=Array.from({length:6},(_,i)=>active.find(m=>Number(m.slot)===i+1));
  return `<div class="panel">${roster()}${view==='party'?`<div class="poke-grid">${slots.map((m,i)=>m?card(m):`<div class="empty">Slot ${i+1}<br>Empty</div>`).join('')}</div>`:
  `<div class="poke-grid">${storage.length?storage.map(card).join(''):'<div class="empty">No Pokémon in storage.</div>'}</div>`}</div>
- ${GM_SITE?`<section class="panel"><h3>Custom Pokémon & forms</h3><p>Create custom species once, then select them when assigning a Pokémon. Official species import from PokéAPI instead.</p><div class="actions"><button class="btn" data-act="custom">+ Register custom species</button><button class="btn" data-act="santara-catalog">+ Import Santara Content</button><button class="btn" data-act="define-move">+ Custom Move</button><button class="btn" data-act="define-ability">+ Custom Ability</button></div><p class="hint">${customs.length} custom species · ${customMoves.length} custom moves · ${customAbilities.length} custom abilities</p></section><section class="panel"><h3>V5.2 calculations</h3><p>Our V5.2 offense and defense multipliers are already included. You can override the table or set a fixed AC if needed.</p><button class="btn" data-act="rules">Edit battle rules</button><p class="hint">${battleRules?'Custom V5.2 settings loaded.':'Default V5.2 multipliers are active.'}</p></section>` :''}${gmMechanicsUI()}${requestsSection()}`;
+ ${GM_SITE?`<section class="panel"><h3>Custom Pokémon & forms</h3><p>Create custom species once, then select them when assigning a Pokémon. Official species import from PokéAPI instead.</p><div class="actions"><button class="btn" data-act="custom">+ Register custom species</button><button class="btn" data-act="santara-catalog">+ Import Santara Content</button><button class="btn" data-act="artwork-library">Manage Artwork</button><button class="btn" data-act="define-move">+ Custom Move</button><button class="btn" data-act="define-ability">+ Custom Ability</button></div><p class="hint">${customs.length} custom species · ${customMoves.length} custom moves · ${customAbilities.length} custom abilities</p></section><section class="panel"><h3>V5.2 calculations</h3><p>Our V5.2 offense and defense multipliers are already included. You can override the table or set a fixed AC if needed.</p><button class="btn" data-act="rules">Edit battle rules</button><p class="hint">${battleRules?'Custom V5.2 settings loaded.':'Default V5.2 multipliers are active.'}</p></section>` :''}${gmMechanicsUI()}${requestsSection()}`;
 }
 function detail(m){
  const shown=displayPokemon(m),s=shown.baseStats||{},d=combatSummary(shown,battleRules);
@@ -554,6 +653,8 @@ function render(){
  if(view==='assign'){root.innerHTML=gmForm();return}
  if(view==='custom'){root.innerHTML=customForm();return}
  if(view==='santara-catalog'){root.innerHTML=santaraImporterUI();return}
+ if(view==='artwork-library'){root.innerHTML=artworkLibraryUI();return}
+ if(view==='artwork-edit'){root.innerHTML=artworkEditorUI();return}
  if(view==='mega-form'){root.innerHTML=editorUI(editingMega||{},statKeys,statLabels,option,esc);return}
  if(view==='custom-move'){root.innerHTML=catalogForm('move');return}
  if(view==='custom-ability'){root.innerHTML=catalogForm('ability');return}
@@ -563,7 +664,7 @@ function render(){
  const mon=pokemon.find(m=>m.id===chosen);
  root.innerHTML=mon?detail(mon):listView();
 }
-function clearSelection(){chosen='';editingId='';draft=null;requestDraft=null;activeRequestId='';returnToAssign=false;editingMega=null;megaImported=false;view='party';render()}
+function clearSelection(){chosen='';editingId='';draft=null;requestDraft=null;activeRequestId='';returnToAssign=false;editingMega=null;megaImported=false;artworkSelected=null;artworkQuery='';artworkKind='all';view='party';render()}
 async function selectMon(id){
  chosen=id;const m=pokemon.find(x=>x.id===id);
  if(m){moveInfo={};await lookupMoves(m.moves||[]);render()}
@@ -676,6 +777,18 @@ root.addEventListener('click',async e=>{
   if(action==='reject'&&GM_SITE)await rejectRequest(b.dataset.id)
   if(action==='custom'&&GM_SITE){view='custom';chosen='';render()}
   if(action==='santara-catalog'&&GM_SITE){view='santara-catalog';chosen='';render()}
+  if(action==='artwork-library'&&GM_SITE){view='artwork-library';artworkSelected=null;chosen='';render()}
+  if(action==='artwork-edit'&&GM_SITE){
+   const entry={kind:b.dataset.kind,id:b.dataset.id};
+   if(!artworkFor(entry,customs,megaForms))throw Error('Artwork record not found.');
+   artworkSelected=entry;view='artwork-edit';render();
+  }
+  if(action==='artwork-remove'&&GM_SITE){busy=true;await removeArtwork()}
+  if(action==='artwork-sync-current'&&GM_SITE){
+   const target=artworkFor(artworkSelected,customs,megaForms);
+   if(!target)throw Error('The custom form no longer exists.');
+   busy=true;await updateArtworkRecord({spriteData:target.spriteData||'',spriteUrl:target.spriteUrl||''},true);
+  }
   if(action==='santara-import'&&GM_SITE){busy=true;await importSantaraGroup(b.dataset.group)}
   if(action==='rules'&&GM_SITE){view='rules';chosen='';render()}
   if(action==='mega-new'&&GM_SITE){editingMega=null;megaImported=false;view='mega-form';render()}
@@ -714,7 +827,33 @@ root.addEventListener('click',async e=>{
   if(action==='google'){await signInWithPopup(auth,new GoogleAuthProvider())}
  }catch(err){fail(err)}finally{busy=false}
 });
+root.addEventListener('input',e=>{
+ if(e.target.id==='artwork-search'&&view==='artwork-library'){
+  artworkQuery=e.target.value;
+  const gallery=document.getElementById('artwork-gallery');
+  if(gallery)gallery.innerHTML=artworkTiles();
+ }
+});
 root.addEventListener('change',e=>{
+ if(e.target.id==='artwork-kind-filter'&&view==='artwork-library'){
+  artworkKind=e.target.value;
+  const gallery=document.getElementById('artwork-gallery');
+  if(gallery)gallery.innerHTML=artworkTiles();
+ }
+ if(view==='artwork-edit'&&e.target.name==='artwork-url'){
+  const form=e.target.closest('form'),url=e.target.value.trim();
+  if(url&&form?.elements['artwork-upload'])form.elements['artwork-upload'].value='';
+  if(/^https:\/\/.+$/.test(url))artworkPreview(url,artworkFor(artworkSelected,customs,megaForms)?.name||'Artwork');
+ }
+ if(view==='artwork-edit'&&e.target.name==='artwork-upload'&&e.target.files?.length){
+  const form=e.target.closest('form'),file=e.target.files[0],entry=artworkSelected;
+  if(form?.elements['artwork-url'])form.elements['artwork-url'].value='';
+  imgToWebp(file).then(data=>{
+   if(view==='artwork-edit'&&artworkSelected?.id===entry?.id&&artworkSelected?.kind===entry?.kind)
+    artworkPreview(data,artworkFor(entry,customs,megaForms)?.name||'Artwork');
+  }).catch(fail);
+ }
+
  if(e.target.id==='tera-type'&&chosen){
   const mon=pokemon.find(x=>x.id===chosen);
   if(mon)setTeraType(mon,e.target.value).catch(fail);
@@ -748,6 +887,7 @@ root.addEventListener('submit',async e=>{
   if(form.id==='track-form')await saveTracking(form);
   if(form.id==='assign-form'&&GM_SITE)await saveAssign(form);
   if(form.id==='custom-form'&&GM_SITE)await saveCustom(form);
+  if(form.id==='artwork-form'&&GM_SITE)await saveArtwork(form);
   if(form.id==='custom-move-form'&&GM_SITE)await saveCatalog(form,true);
   if(form.id==='custom-ability-form'&&GM_SITE)await saveCatalog(form,false);
   if(form.id==='request-form'&&!GM_SITE)await saveRequest(form);

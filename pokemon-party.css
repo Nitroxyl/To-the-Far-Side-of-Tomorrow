@@ -25,3 +25,27 @@ label.gimmick-tile{flex-direction:row;align-items:flex-start}
 .mega-entry{display:flex;align-items:center;flex-wrap:wrap;gap:10px;border:1px solid #3c5969;border-radius:10px;padding:11px;margin:9px 0}
 .mega-entry .btn{margin-left:auto}.gimmick-tile .field{width:100%}
 @media(max-width:720px){.gimmick-grid{grid-template-columns:1fr}}
+
+
+/* GM custom species and Mega artwork catalogue */
+.artwork-toolbar{display:flex;gap:13px;align-items:flex-end;flex-wrap:wrap;margin:20px 0}
+.artwork-toolbar .field{min-width:185px}
+.artwork-toolbar .artwork-search{flex:1;min-width:240px}
+.artwork-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
+.artwork-card{display:flex;flex-direction:column;background:#102735;border:1px solid #3e6272;border-radius:14px;overflow:hidden;color:var(--text);text-align:left;padding:0;min-width:0;transition:border-color .15s,transform .15s}
+.artwork-card:hover{border-color:var(--teal);transform:translateY(-2px)}
+.artwork-card:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.artwork-card-image{height:168px;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 30%,#254858,#102634);padding:13px}
+.artwork-card-image img,.artwork-large-preview img{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain}
+.artwork-card-label{display:flex;flex-direction:column;gap:3px;padding:12px}
+.artwork-card-label b{overflow-wrap:anywhere}
+.artwork-card-label small{color:var(--muted)}
+.artwork-empty{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;font-size:50px;color:#6e9aa8}
+.artwork-empty small{font-size:12px}
+.artwork-editor{display:grid;grid-template-columns:minmax(200px,360px) 1fr;gap:22px;align-items:start}
+.artwork-large-preview{height:345px;background:radial-gradient(circle at 50% 30%,#234758,#0c1e2a);border:1px solid #3c6071;border-radius:16px;display:flex;align-items:center;justify-content:center;padding:18px;overflow:hidden}
+.artwork-sync{display:flex;flex-direction:row;align-items:flex-start;gap:10px;font-size:13px;font-weight:500;line-height:1.5}
+.artwork-sync input[type=checkbox]{width:19px;height:19px;flex:0 0 auto;margin:1px 0 0;accent-color:var(--teal)}
+.artwork-editor .actions.full{grid-column:1/-1}
+@media(max-width:740px){.artwork-editor{grid-template-columns:1fr}.artwork-large-preview{height:280px}.artwork-gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:420px){.artwork-gallery{grid-template-columns:1fr 1fr}.artwork-card-image{height:130px}.artwork-card-label{font-size:13px}}
