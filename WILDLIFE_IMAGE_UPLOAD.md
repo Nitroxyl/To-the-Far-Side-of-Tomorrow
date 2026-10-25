@@ -16,7 +16,7 @@ The Player sighting editor also accepts local image uploads, but **player-create
 
 ## Technical notes
 
-- The browser accepts JPEG, PNG or WebP files up to 8 MB, then preserves the whole image in a centered square canvas and encodes a small WebP (55,000-character data URL limit, typically ~40 KiB).
+- The browser accepts JPEG, PNG or WebP files up to 8 MB, then preserves the original aspect ratio while resizing and encodes a small WebP (55,000-character data URL limit, typically ~40 KiB).
 - No new Firebase service, Firestore rule change, Firebase Storage or paid Firebase plan is needed.
 - The upload takes precedence over a saved HTTPS artwork URL. **Remove uploaded image** restores the URL/standard automatic artwork fallback after saving.
 - The existing shared publication is a **single Firestore document**. The GM publishing button now warns and stops if the JSON snapshot is over 850 KB; individual uploads are capped to keep a small party practical. With large galleries or lots of Pokémon, move images to Firebase Storage or separate image documents instead of inflating the shared snapshot.
