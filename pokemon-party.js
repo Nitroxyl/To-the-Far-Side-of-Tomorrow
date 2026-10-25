@@ -7,6 +7,7 @@ import {TYPES,KEYS,unlockUI,libraryUI,editorUI,controlsUI} from './pokemon-gimmi
 import {publicPartySlots,partySignature} from './pokemon-public-party.js';
 import {SANTARA_CATALOG_GROUPS,santaraCatalogEntries} from './santara-catalog.js';
 import {artworkEntries,artworkFor,artworkPropagation} from './pokemon-artwork.js';
+import {customContentLibraryUI} from './pokemon-custom-library.js';
 
 const GM_UID='ctBLgrVgkLOzUJYTyYgU9IwejYx1';
 const GM_SITE=window.SANTARA_POKEMON_EDITION==='gm';
@@ -22,6 +23,7 @@ const statuses=['None','Burned','Poisoned','Badly poisoned','Paralyzed','Asleep'
 const STAT_NAMES=['HP','Atk','Def','SpA','SpD','Spe'];
 const apiCache=new Map(),moveCache=new Map();
 let app,auth,store,user=null,allowed=false,stopAccess=null,stopPokemon=null,stopApprovals=null,stopCustoms=null,stopRequests=null,stopCards=null,stopMoves=null,stopAbilities=null,stopGimmicks=null,stopMegaForms=null;
+let editingCustom=null,editingCatalog=null,originLibrary=false,libraryKind='all',librarySearch='';
 let pokemon=[],trainers=[],trainerCards=[],customs=[],customMoves=[],customAbilities=[],requests=[],megaForms=[],trainerUnlocks={},playerUnlocks=initialUnlocks(),editingMega=null,megaImported=false,battleRules=null,stopRules=null,view='party',chosen='',ownerFilter='',editingId='',draft=null,requestDraft=null,activeRequestId='',returnToAssign=false,collectionReady=false,collectionError='',moveInfo={},busy=false,artworkKind='all',artworkQuery='',artworkSelected=null;
 
 document.getElementById('edition-name').textContent=GM_SITE?'GM CONSOLE / TEAM MANAGEMENT':'POKÉDEX / TRAINER COLLECTION';
@@ -70,6 +72,8 @@ function copyAssignmentDraft(){
   origin:cap(fd.get('origin'),150),notes:cap(fd.get('notes'),1000)};
 }
 function catalogReturn(){
+ editingCatalog=null;
+ if(originLibrary){originLibrary=false;view='custom-library';render();return}
  if(returnToAssign){
   returnToAssign=false;view='assign';render();
  }else clearSelection();
@@ -77,18 +81,19 @@ function catalogReturn(){
 function catalogForm(kind){
  const isMove=kind==='move';
  const options=isMove?customMoves:customAbilities;
+ const chosen=editingCatalog||null;
  return `<section class="panel">
  <div class="toolbar"><h2>${isMove?'Define custom move':'Define custom ability'}</h2><button class="btn" type="button" data-act="catalog-back">← Back</button></div>
  <p>Definitions are reusable across Santara Pokémon and saved to Firestore. Existing Pokémon can select them without changing their base stats.</p>
  <form id="${isMove?'custom-move-form':'custom-ability-form'}" class="form-grid">
- <label class="field full">Name<input name="name" maxlength="48" required placeholder="${isMove?'e.g. Primordial Crush':'e.g. Apex Predator'}" list="registered-names"></label>
+ <label class="field full">Name<input name="name" maxlength="48" required placeholder="${isMove?'e.g. Primordial Crush':'e.g. Apex Predator'}" list="registered-names" value="${esc(chosen?.name||'')}"></label>
  <datalist id="registered-names">${options.map(x=>`<option value="${esc(x.name)}"></option>`).join('')}</datalist>
- ${isMove?`<label class="field">Type<select name="type">${['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy'].map(t=>option(t,t[0].toUpperCase()+t.slice(1),'dragon')).join('')}</select></label>
- <label class="field">Category<select name="category">${['Physical','Special','Status'].map(t=>option(t,t,'Physical')).join('')}</select></label>
- <label class="field">Base Power (optional)<input name="power" type="number" min="0" max="300" placeholder="e.g. 90"></label>
- <label class="field">Accuracy % (optional)<input name="accuracy" type="number" min="1" max="100" placeholder="Leave empty if it cannot miss"></label>
- <label class="field full">D&D dice or damage notation (optional)<input name="dice" maxlength="120" placeholder="e.g. 4d8, or scaling by level"></label>`:''}
- <label class="field full">${isMove?'Move effects, targeting and range':'Ability effect'}<textarea name="description" minlength="1" maxlength="1000" required placeholder="Describe how the ${isMove?'move':'ability'} works in our tabletop rules."></textarea></label>
+ ${isMove?`<label class="field">Type<select name="type">${['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy'].map(t=>option(t,t[0].toUpperCase()+t.slice(1),chosen?.type||'dragon')).join('')}</select></label>
+ <label class="field">Category<select name="category">${['Physical','Special','Status'].map(t=>option(t,t,chosen?.category||'Physical')).join('')}</select></label>
+ <label class="field">Base Power (optional)<input name="power" type="number" min="0" max="300" placeholder="e.g. 90" value="${chosen?.power??''}"></label>
+ <label class="field">Accuracy % (optional)<input name="accuracy" type="number" min="1" max="100" placeholder="Leave empty if it cannot miss" value="${chosen?.accuracy??''}"></label>
+ <label class="field full">D&D dice or damage notation (optional)<input name="dice" maxlength="120" placeholder="e.g. 4d8, or scaling by level" value="${esc(chosen?.dice||'')}"></label>`:''}
+ <label class="field full">${isMove?'Move effects, targeting and range':'Ability effect'}<textarea name="description" minlength="1" maxlength="1000" required placeholder="Describe how the ${isMove?'move':'ability'} works in our tabletop rules.">${esc(chosen?.description||'')}</textarea></label>
  <p class="hint full">Entering an existing custom name replaces that definition; it will also update the description shown on Pokémon sheets using it.</p>
  <div class="actions"><button class="btn primary" type="submit">Save ${isMove?'custom move':'custom ability'}</button></div>
  </form></section>`;
@@ -100,7 +105,8 @@ async function saveCatalog(form,isMove){
  if(!description)throw Error('Describe the effect before saving.');
  const coll=isMove?'santara_custom_moves':'santara_custom_abilities';
  const existing=(isMove?customMoves:customAbilities).find(x=>x.slug===slug);
- if(existing&&!confirm('Replace the existing definition of '+existing.name+'?'))return;
+ if(editingCatalog?.slug&&editingCatalog.slug!==slug)throw Error('To rename a definition, create a new entry rather than changing its ID.');
+ if(existing&&!editingCatalog&&!confirm('Replace the existing definition of '+existing.name+'?'))return;
  let record={slug,name,description,updatedAt:serverTimestamp()};
  if(isMove){
   const type=String(fd.get('type')||''),category=String(fd.get('category')||'');
@@ -295,7 +301,7 @@ async function saveMegaForm(form){
  await setDoc(doc(store,'santara_mega_forms',slug),{slug,name,baseSpeciesKey:key,baseStats,types,ability,spriteUrl,spriteData,
   source:megaImported?'official':'custom',updatedAt:serverTimestamp()});
  say(name+' saved. Assign this form to a compatible regular Pokémon from the GM editor.');
- editingMega=null;megaImported=false;clearSelection();
+ editingMega=null;megaImported=false;if(originLibrary){originLibrary=false;view='custom-library';render()}else clearSelection();
 }
 async function importMega(form){
  const f=new FormData(form),name=cap(f.get('officialKey'),70);
@@ -411,7 +417,7 @@ function connect(){
  },e=>console.warn('Unlock listener:',e.message));
  if(GM_SITE)stopMegaForms=onSnapshot(collection(store,'santara_mega_forms'),snap=>{
   megaForms=snap.docs.map(d=>({...d.data(),slug:d.id})).sort((a,b)=>a.name.localeCompare(b.name));
-  if(view==='party'||view==='storage')render();
+  if(view==='party'||view==='storage'||view==='custom-library')render();
  },e=>console.warn('Mega library listener:',e.message));
 
  stopRules=onSnapshot(doc(store,'santara_battle_rules','v5_2'),snapshot=>{battleRules=snapshot.exists()?snapshot.data():null;render()},e=>{battleRules=null;console.warn('Optional GM overrides unavailable:',e.message);});
@@ -434,11 +440,11 @@ function connect(){
    },fail);
    stopCards=onSnapshot(collection(store,'santara_trainer_cards'),snapshot=>{
      trainerCards=snapshot.docs.map(d=>({uid:d.id,...d.data()}));
-     publishVisibleParties();if(view==='party'||view==='storage')render();
+     publishVisibleParties();if(view==='party'||view==='storage'||view==='custom-library')render();
    },e=>console.warn('Trainer Card names could not load:',e.message));
  }
  stopMoves=onSnapshot(collection(store,'santara_custom_moves'),snapshot=>{
-   customMoves=snapshot.docs.map(d=>({...d.data(),slug:d.id}));for(const m of customMoves){const key=m.name.toLowerCase().trim().replace(/\s+/g,'-');moveCache.delete(key)}if(chosen){lookupMoves(pokemon.find(p=>p.id===chosen)?.moves||[]).then(render)}else if(view==='party'||view==='storage')render();
+   customMoves=snapshot.docs.map(d=>({...d.data(),slug:d.id}));for(const m of customMoves){const key=m.name.toLowerCase().trim().replace(/\s+/g,'-');moveCache.delete(key)}if(chosen){lookupMoves(pokemon.find(p=>p.id===chosen)?.moves||[]).then(render)}else if(view==='party'||view==='storage'||view==='custom-library')render();
  },e=>console.warn('Custom moves cannot load:',e.message));
  stopAbilities=onSnapshot(collection(store,'santara_custom_abilities'),snapshot=>{
    customAbilities=snapshot.docs.map(d=>({...d.data(),slug:d.id}));if(view==='party'||view==='storage'||chosen)render();
@@ -582,7 +588,7 @@ function listView(){
  const slots=Array.from({length:6},(_,i)=>active.find(m=>Number(m.slot)===i+1));
  return `<div class="panel">${roster()}${view==='party'?`<div class="poke-grid">${slots.map((m,i)=>m?card(m):`<div class="empty">Slot ${i+1}<br>Empty</div>`).join('')}</div>`:
  `<div class="poke-grid">${storage.length?storage.map(card).join(''):'<div class="empty">No Pokémon in storage.</div>'}</div>`}</div>
- ${GM_SITE?`<section class="panel"><h3>Custom Pokémon & forms</h3><p>Create custom species once, then select them when assigning a Pokémon. Official species import from PokéAPI instead.</p><div class="actions"><button class="btn" data-act="custom">+ Register custom species</button><button class="btn" data-act="santara-catalog">+ Import Santara Content</button><button class="btn" data-act="artwork-library">Manage Artwork</button><button class="btn" data-act="define-move">+ Custom Move</button><button class="btn" data-act="define-ability">+ Custom Ability</button></div><p class="hint">${customs.length} custom species · ${customMoves.length} custom moves · ${customAbilities.length} custom abilities</p></section><section class="panel"><h3>V5.2 calculations</h3><p>Our V5.2 offense and defense multipliers are already included. You can override the table or set a fixed AC if needed.</p><button class="btn" data-act="rules">Edit battle rules</button><p class="hint">${battleRules?'Custom V5.2 settings loaded.':'Default V5.2 multipliers are active.'}</p></section>` :''}${gmMechanicsUI()}${requestsSection()}`;
+ ${GM_SITE?`<section class="panel"><h3>Custom Pokémon & forms</h3><p>Create custom species once, then select them when assigning a Pokémon. Official species import from PokéAPI instead.</p><div class="actions"><button class="btn primary" data-act="custom-library">Browse Custom Content</button><button class="btn" data-act="custom">+ Register custom species</button><button class="btn" data-act="santara-catalog">+ Import Santara Content</button><button class="btn" data-act="artwork-library">Manage Artwork</button><button class="btn" data-act="define-move">+ Custom Move</button><button class="btn" data-act="define-ability">+ Custom Ability</button></div><p class="hint">${customs.length} custom species · ${customMoves.length} custom moves · ${customAbilities.length} custom abilities</p></section><section class="panel"><h3>V5.2 calculations</h3><p>Our V5.2 offense and defense multipliers are already included. You can override the table or set a fixed AC if needed.</p><button class="btn" data-act="rules">Edit battle rules</button><p class="hint">${battleRules?'Custom V5.2 settings loaded.':'Default V5.2 multipliers are active.'}</p></section>` :''}${gmMechanicsUI()}${requestsSection()}`;
 }
 function detail(m){
  const shown=displayPokemon(m),s=shown.baseStats||{},d=combatSummary(shown,battleRules);
@@ -669,14 +675,15 @@ async function saveRules(form){
  say('V5.2 combat tables saved for all approved Trainers.');clearSelection();
 }
 function customForm(){
+ const saved=editingCustom||{};
  return `<section class="panel"><div class="toolbar"><h2>Register a Santara species or custom form</h2><button class="btn" data-act="back">← Cancel</button></div>
  <form id="custom-form" class="form-grid">
- <label class="field">Species/form name<input required name="name" maxlength="65" placeholder="Mega Charizard Z"></label>
- <label class="field">Types (comma-separated)<input required name="types" maxlength="70" placeholder="Fire, Dragon"></label>
- <div class="field full"><span class="eyebrow">Available abilities</span><div class="move-fields">${Array.from({length:3},(_,i)=>`<label class="field">Ability ${i+1}<input name="speciesAbility${i+1}" list="custom-species-abilities" maxlength="48" placeholder="Official or custom ability"></label>`).join('')}</div>
+ <label class="field">Species/form name<input required name="name" maxlength="65" placeholder="Mega Charizard Z" value="${esc(saved.name||'')}"></label>
+ <label class="field">Types (comma-separated)<input required name="types" maxlength="70" placeholder="Fire, Dragon" value="${esc((saved.types||[]).join(', '))}"></label>
+ <div class="field full"><span class="eyebrow">Available abilities</span><div class="move-fields">${Array.from({length:3},(_,i)=>`<label class="field">Ability ${i+1}<input name="speciesAbility${i+1}" list="custom-species-abilities" maxlength="48" placeholder="Official or custom ability" value="${esc((saved.abilities||[])[i]||'')}"></label>`).join('')}</div>
  <datalist id="custom-species-abilities">${customAbilities.map(a=>`<option value="${esc(a.name)}"></option>`).join('')}</datalist><span class="hint">Define ability effects using the Custom Ability editor on the GM Pokémon home screen.</span></div>
- ${statInputs(null)}
- <label class="field full">Artwork URL (HTTPS, optional)<input name="spriteUrl" type="url" placeholder="https://…"></label>
+ ${statInputs(saved.baseStats)}
+ <label class="field full">Artwork URL (HTTPS, optional)<input name="spriteUrl" type="url" placeholder="https://…" value="${esc(saved.spriteUrl||'')}"></label>
  <label class="field full">Or upload artwork (PNG/JPG/WebP, compressed to small WebP)<input name="upload" type="file" accept="image/png,image/jpeg,image/webp"></label>
  <p class="hint full">Custom Pokémon are saved once in Firestore, then can be assigned to approved Trainers. Uploads are compressed and limited to 150 KB of encoded data; URLs are an alternative.</p>
  <div class="actions"><button class="btn primary" type="submit">Save custom species</button></div>
@@ -688,6 +695,7 @@ function render(){
  chip.textContent=GM_SITE?'GM authenticated':user.email||'Trainer';
  if(view==='assign'){root.innerHTML=gmForm();return}
  if(view==='custom'){root.innerHTML=customForm();return}
+ if(view==='custom-library'){root.innerHTML=customContentLibraryUI({species:customs,megas:megaForms,moves:customMoves,abilities:customAbilities,category:libraryKind,search:librarySearch,esc});return}
  if(view==='santara-catalog'){root.innerHTML=santaraImporterUI();return}
  if(view==='artwork-library'){root.innerHTML=artworkLibraryUI();return}
  if(view==='artwork-edit'){root.innerHTML=artworkEditorUI();return}
@@ -700,7 +708,7 @@ function render(){
  const mon=pokemon.find(m=>m.id===chosen);
  root.innerHTML=mon?detail(mon):listView();
 }
-function clearSelection(){chosen='';editingId='';draft=null;requestDraft=null;activeRequestId='';returnToAssign=false;editingMega=null;megaImported=false;artworkSelected=null;artworkQuery='';artworkKind='all';view='party';render()}
+function clearSelection(){originLibrary=false;editingCustom=null;editingCatalog=null;chosen='';editingId='';draft=null;requestDraft=null;activeRequestId='';returnToAssign=false;editingMega=null;megaImported=false;artworkSelected=null;artworkQuery='';artworkKind='all';view='party';render()}
 async function selectMon(id){
  chosen=id;const m=pokemon.find(x=>x.id===id);
  if(m){moveInfo={};await lookupMoves(m.moves||[]);render()}
@@ -729,10 +737,11 @@ async function saveCustom(form){
  if(!types.length)throw Error('At least one type is required.');
  const url=cap(f.get('spriteUrl'),400);
  if(url&&!safeUrl(url))throw Error('Artwork links must use HTTPS.');
- const spriteData=await imgToWebp(f.get('upload')?.size?f.get('upload'):null);
- if(customs.some(x=>x.slug===slug)&&!confirm('Replace this existing custom species template? Existing assigned Pokémon will keep their own saved stats.'))return;
+ const spriteData=f.get('upload')?.size?await imgToWebp(f.get('upload')):(editingCustom?.spriteData||'');
+ if(editingCustom?.slug && editingCustom.slug!==slug)throw Error('To rename this species, create a new definition.');
+ if(customs.some(x=>x.slug===slug)&&!editingCustom&&!confirm('Replace this species definition? Existing Pokémon keep their saved stats.'))return;
  await setDoc(doc(store,'santara_species_overrides',slug),{slug,name,baseStats,types,abilities,spriteUrl:url,spriteData,updatedAt:serverTimestamp()});
- say(name+' saved to the custom species catalogue.');clearSelection();
+ say(name+' saved to the custom species catalogue.');editingCustom=null;if(originLibrary){originLibrary=false;view='custom-library';render()}else clearSelection();
 }
 async function saveAssign(form){
  const f=new FormData(form),existing=pokemon.find(x=>x.id===editingId);
@@ -811,7 +820,27 @@ root.addEventListener('click',async e=>{
   if(action==='request-lookup'&&!GM_SITE){const f=document.getElementById('request-form');const species=await findSpecies(f.elements.species.value);requestDraft={...species,level:Number(f.elements.level.value)||5,nickname:f.elements.nickname.value,notes:f.elements.notes.value};say('Species stats loaded. Submit your request to the GM.');render()}
   if(action==='review'&&GM_SITE){say('Loading requested species…');await reviewRequest(b.dataset.id)}
   if(action==='reject'&&GM_SITE)await rejectRequest(b.dataset.id)
-  if(action==='custom'&&GM_SITE){view='custom';chosen='';render()}
+  if(action==='custom-library'&&GM_SITE){view='custom-library';chosen='';originLibrary=false;render()}
+  if(action==='library-new'&&GM_SITE){originLibrary=true;editingCustom=null;editingCatalog=null;editingMega=null;megaImported=false;const kind=b.dataset.kind;view=kind==='species'?'custom':kind==='mega'?'mega-form':kind==='move'?'custom-move':'custom-ability';render()}
+  if(action==='library-edit'&&GM_SITE){
+   const kind=b.dataset.kind,id=b.dataset.id;
+   originLibrary=true;editingCustom=null;editingCatalog=null;editingMega=null;
+   if(kind==='species'){editingCustom=customs.find(x=>x.slug===id);if(!editingCustom)throw Error('Species not found');view='custom'}
+   else if(kind==='mega'){editingMega=megaForms.find(x=>x.slug===id);if(!editingMega)throw Error('Mega not found');megaImported=editingMega.source==='official';view='mega-form'}
+   else {editingCatalog=(kind==='move'?customMoves:customAbilities).find(x=>x.slug===id);if(!editingCatalog)throw Error('Definition not found');view=kind==='move'?'custom-move':'custom-ability'}
+   render();
+  }
+  if(action==='library-delete'&&GM_SITE){
+   const kind=b.dataset.kind,id=b.dataset.id;
+   const lookup={species:[customs,'santara_species_overrides'],mega:[megaForms,'santara_mega_forms'],move:[customMoves,'santara_custom_moves'],ability:[customAbilities,'santara_custom_abilities']};
+   const entry=lookup[kind]?.[0]?.find(x=>x.slug===id);
+   if(!entry)throw Error('Custom content not found');
+   const references=pokemon.filter(m=>kind==='species'?m.speciesKey==='custom:'+id:kind==='mega'?m.megaForm?.slug===id:kind==='move'?m.moves?.some(x=>x.toLowerCase()===entry.name.toLowerCase()):m.ability?.toLowerCase()===entry.name.toLowerCase()).length;
+   if(confirm('Delete '+entry.name+' from the '+kind+' library? '+(references?references+' assigned Pokémon reference it. Existing Pokémon will NOT be deleted, but linked definitions may no longer display.':'No assigned Pokémon references found.')+' This cannot be undone.')){
+    busy=true;await deleteDoc(doc(store,lookup[kind][1],id));say(entry.name+' removed from the custom library. Existing Pokémon have not been deleted.');
+   }
+  }
+  if(action==='custom'&&GM_SITE){editingCustom=null;originLibrary=false;view='custom';chosen='';render()}
   if(action==='santara-catalog'&&GM_SITE){view='santara-catalog';chosen='';render()}
   if(action==='artwork-library'&&GM_SITE){view='artwork-library';artworkSelected=null;chosen='';render()}
   if(action==='artwork-edit'&&GM_SITE){
@@ -870,7 +899,15 @@ root.addEventListener('input',e=>{
   if(gallery)gallery.innerHTML=artworkTiles();
  }
 });
+root.addEventListener('input',e=>{
+ if(e.target.id==='library-search'){
+  librarySearch=e.target.value;
+  for(const node of root.querySelectorAll('[data-library-search]'))
+   node.hidden=!node.dataset.librarySearch.includes(librarySearch.toLowerCase());
+ }
+});
 root.addEventListener('change',e=>{
+ if(e.target.id==='library-kind'&&view==='custom-library'){libraryKind=e.target.value;render();return}
  if(e.target.id==='artwork-kind-filter'&&view==='artwork-library'){
   artworkKind=e.target.value;
   const gallery=document.getElementById('artwork-gallery');
