@@ -312,11 +312,39 @@ service cloud.firestore {
            d.megaForm.baseSpeciesKey == d.speciesKey))
         && d.updatedAt == request.time;
     }
+    // Repositioning a pre-V5.2 Pokémon must not require all later schema
+    // fields to exist. This exception is GM-only and strictly slot/timestamp.
+    function gmLegacySlotUpdate() {
+      return gm()
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['slot','updatedAt'])
+        && request.resource.data.slot is int
+        && request.resource.data.slot >= 0
+        && request.resource.data.slot <= 6
+        && request.resource.data.updatedAt == request.time;
+    }
+    // A GM may attach or detach a validated Mega snapshot without rewriting
+    // the rest of an old Pokémon's data. Useful for pre-gimmick records.
+    function gmLegacyMegaUpdate() {
+      return gm()
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.speciesKey == resource.data.speciesKey
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'megaForm','megaActive','updatedAt'
+        ])
+        && (request.resource.data.get('megaForm',null) == null
+          || (megaSnapshotValid(request.resource.data.megaForm)
+            && request.resource.data.megaForm.baseSpeciesKey == resource.data.speciesKey))
+        && request.resource.data.get('megaActive',false) == false
+        && request.resource.data.updatedAt == request.time;
+    }
     match /santara_pokemon/{pokemonId} {
       allow get, list: if gm() || (approved() && resource.data.ownerUid == request.auth.uid);
       allow create: if gm() && pokemonValid(request.resource.data);
       allow delete: if gm();
-      allow update: if gm() && pokemonValid(request.resource.data)
+      allow update: if (gm() && pokemonValid(request.resource.data))
+        || gmLegacySlotUpdate()
+        || gmLegacyMegaUpdate()
         || (approved() && resource.data.ownerUid == request.auth.uid
           && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
