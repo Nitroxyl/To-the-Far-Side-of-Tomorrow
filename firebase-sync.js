@@ -35,14 +35,25 @@ if (!bridge) {
       const signInButton = panel.querySelector('#cloud-signin');
       const publishButton = panel.querySelector('#cloud-publish');
       const signOutButton = panel.querySelector('#cloud-signout');
-      let currentUser = null;
-      onAuthStateChanged(auth, user => {
-        currentUser = user;
-        signInButton.hidden = Boolean(user);
-        signOutButton.hidden = !user;
-        publishButton.disabled = !user;
-        status(user ? `Signed in: ${user.email || user.uid}. Review the Publish tab before uploading.` : 'Sign in with your GM Google account to publish.');
-      }, error => status(`Authentication error: ${error.message}`));
+      const ROOT_UID='ctBLgrVgkLOzUJYTyYgU9IwejYx1';
+      let currentUser=null,roleAllowed=false,stopRole=null;
+      onAuthStateChanged(auth,user=>{
+        stopRole?.();stopRole=null;
+        currentUser=user;roleAllowed=false;
+        signInButton.hidden=Boolean(user);
+        signOutButton.hidden=!user;
+        publishButton.disabled=true;
+        if(!user){status('Sign in with an authorized GM account to publish.');return}
+        if(user.uid===ROOT_UID){roleAllowed=true;publishButton.disabled=false;
+          status('Founding GM: '+(user.email||user.uid));return}
+        if(!user.emailVerified){status('Verify your account email to use delegated GM privileges.');return}
+        stopRole=onSnapshot(doc(store,'santara_gm_accounts',user.uid),snap=>{
+          const record=snap.exists()?snap.data():null;
+          roleAllowed=record?.enabled===true&&record.email===user.email;
+          publishButton.disabled=!roleAllowed;
+          status(roleAllowed?'Authorized GM: '+user.email:'No GM role for this account. Open Account Access to request authorization.');
+        },err=>{roleAllowed=false;publishButton.disabled=true;status('GM authorization check failed: '+err.message)});
+      },error=>status('Authentication error: '+error.message));
       signInButton.addEventListener('click', async () => {
         try { await signInWithPopup(auth, new GoogleAuthProvider()); }
         catch (error) { status(`Sign-in failed: ${error.message}`); }
@@ -52,7 +63,7 @@ if (!bridge) {
         catch (error) { status(`Sign-out failed: ${error.message}`); }
       });
       publishButton.addEventListener('click', async () => {
-        if (!currentUser) return;
+        if (!currentUser||!roleAllowed) return;
         const bundle = bridge.publicBundle();
         const count = bundle.sites.length + bundle.requests.length + bundle.sightings.length;
         const estimatedBytes = new TextEncoder().encode(JSON.stringify(bundle)).length;
@@ -69,7 +80,7 @@ if (!bridge) {
         } catch (error) {
           status(`Publish failed: ${error.message}. Check Firestore Rules and your GM UID.`);
         } finally {
-          publishButton.disabled = !currentUser;
+          publishButton.disabled = !currentUser||!roleAllowed;
         }
       });
     } else {
