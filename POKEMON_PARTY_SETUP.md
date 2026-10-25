@@ -1,3 +1,20 @@
+## Firestore Rules Syntax Repair
+
+The previous committed version of `firestore.rules` contained accidentally truncated regex
+patterns and repeated deny-all statements inside `imageValid`, `urlValid` and
+`customValid`. These caused Firebase compiler errors beginning at line 153.
+This branch repairs all three validators and adds
+`tests/firestore-rules.test.mjs` to catch recurrence.
+
+**Copy the entire `firestore.rules` file from this branch, not the older
+`main` copy or a previous downloaded version.** In Firebase Console → Firestore
+Database → Rules, select all editor contents, paste the corrected file and
+click Publish. The existing published rules remain active until Firebase
+successfully accepts the new ones.
+
+Static delimiter and regex integrity checks passed; the Firebase Console is
+the final authority for compilation and publishing.
+
 # Pokémon Party Manager — rollout
 
 This feature is staged on the `feature/pokemon-party-manager` branches of both Santara repositories. Existing fieldwork and Trainer Card data are left intact.
