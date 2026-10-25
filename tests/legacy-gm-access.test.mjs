@@ -9,8 +9,8 @@ test('GM authority is rooted in an immutable UID and a verified delegated role',
  assert.ok(rules.includes('request.auth.token.email_verified == true'));
  assert.ok(rules.includes('match /santara_gm_accounts/{uid}'));
  assert.ok(rules.includes('request.auth.uid == uid'));
- assert.ok(rules.includes('request.resource.data.email == request.auth.token.email')===false,
-   'New GM roles are created by root, not by the requesting client');
+ assert.ok(rules.includes('get(/databases/$(database)/documents/santara_gm_accounts/$(request.auth.uid)).data.email == request.auth.token.email'));
+
 });
 test('only founding GM can create, change or revoke GM roles',()=>{
  const start=rules.indexOf('match /santara_gm_accounts/{uid}');
