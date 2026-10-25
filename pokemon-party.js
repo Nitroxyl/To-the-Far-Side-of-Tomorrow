@@ -137,6 +137,17 @@ function santaraImporterUI(){
      '<button type="button" class="btn small" data-act="santara-import" data-group="'+esc(group.id)+'">Import missing</button></div>';
   }).join('')+'</section>';
 }
+const SANTARA_RULES_URL='https://github.com/Nitroxyl/To-the-Far-Side-of-Tomorrow-GM-Edition/blob/main/firestore.rules';
+function santaraImportFailure(error,operation,location,partial=0){
+ const message=error?.message||String(error);
+ const denied=error?.code==='permission-denied'||/missing or insufficient permissions/i.test(message);
+ const prefix='Santara import failed while '+operation+' '+location+'. ';
+ const saved=partial?partial+' definition(s) were imported before this failure; retrying will skip them. ':'No definitions were changed by this operation. ';
+ if(denied)return new Error(prefix+saved+
+  'Firestore denied access. Confirm you are signed in as the GM, then publish the complete latest firestore.rules from '+SANTARA_RULES_URL+
+  ' in Firebase Console → Firestore Database → Rules. Rules on GitHub do not deploy automatically.');
+ return new Error(prefix+saved+message);
+}
 async function importSantaraGroup(group){
  if(!GM_SITE||user?.uid!==GM_UID||!allowed)throw Error('GM authentication required.');
  const preset=SANTARA_CATALOG_GROUPS.find(x=>x.id===group);
@@ -144,18 +155,33 @@ async function importSantaraGroup(group){
  const entries=santaraCatalogEntries(group);
  if(!confirm('Import missing definitions for '+preset.label+'? Existing Firestore entries will not be changed. Some definitions will be readable by approved Trainers.'))return;
  say('Checking existing Santara definitions…');
- // Read the current server state rather than trusting possibly stale onSnapshot arrays.
- const checked=await Promise.all(entries.map(async item=>({
-  ...item,exists:(await getDoc(doc(store,item.collection,item.id))).exists()
- })));
+ // Identify the denied document/collection if the published rules lack read permissions.
+ const checked=await Promise.all(entries.map(async item=>{
+  try{
+   return {...item,exists:(await getDoc(doc(store,item.collection,item.id))).exists()};
+  }catch(error){
+   throw santaraImportFailure(error,'reading',item.collection+'/'+item.id);
+  }
+ }));
  const missing=checked.filter(x=>!x.exists);
  if(!missing.length){say('All '+entries.length+' definitions already exist. Nothing was changed.');render();return;}
- const batch=writeBatch(store);
- for(const item of missing)batch.set(doc(store,item.collection,item.id),{
-  ...item.data,updatedAt:serverTimestamp()
- });
- await batch.commit();
- say('Imported '+missing.length+' missing '+preset.label+' definitions; skipped '+(entries.length-missing.length)+' existing records. Existing Pokémon and Mega snapshots were not modified.');
+ // Commit each collection separately so an outdated rule for custom moves or abilities
+ // cannot prevent the registered Mega forms themselves from being imported.
+ let imported=0;
+ for(const collectionName of [...new Set(missing.map(x=>x.collection))]){
+  const items=missing.filter(x=>x.collection===collectionName);
+  const batch=writeBatch(store);
+  for(const item of items)batch.set(doc(store,item.collection,item.id),{
+   ...item.data,updatedAt:serverTimestamp()
+  });
+  try{
+   await batch.commit();
+   imported+=items.length;
+  }catch(error){
+   throw santaraImportFailure(error,'writing',collectionName+' ('+items.length+' records)',imported);
+  }
+ }
+ say('Imported '+imported+' missing '+preset.label+' definitions; skipped '+(entries.length-imported)+' existing records. Existing Pokémon and Mega snapshots were not modified.');
  render();
 }
 
