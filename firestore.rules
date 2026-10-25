@@ -149,21 +149,11 @@ service cloud.firestore {
     }
     function imageValid(value) {
       return value is string && value.size() <= 150000
-        && (value == '' || value.matches('^data:image/webp;base64,[A-Za-z0-9+/=]+
-      allow read, write: if false;
-    }
-  }
-}
-));
+        && (value == '' || value.matches('^data:image/webp;base64,[A-Za-z0-9+/=]+$'));
     }
     function urlValid(value) {
       return value is string && value.size() <= 600
-        && (value == '' || value.matches('^https://.+
-      allow read, write: if false;
-    }
-  }
-}
-));
+        && (value == '' || value.matches('^https://.+$'));
     }
     function shortList(items, limit) {
       return items is list && items.size() <= limit;
@@ -175,12 +165,7 @@ service cloud.firestore {
         && d.keys().hasAll([
           'slug','name','baseStats','types','abilities','spriteUrl','spriteData','updatedAt'
         ])
-        && d.slug is string && d.slug.matches('^[a-z0-9-]{2,70}
-      allow read, write: if false;
-    }
-  }
-}
-)
+        && d.slug is string && d.slug.matches('^[a-z0-9-]{2,70}$')
         && d.name is string && d.name.size() > 0 && d.name.size() <= 65
         && statsValid(d.baseStats)
         && shortList(d.types,2) && d.types.size() > 0
