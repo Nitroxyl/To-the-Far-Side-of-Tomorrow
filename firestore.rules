@@ -274,8 +274,7 @@ service cloud.firestore {
         && d.keys().hasAll([
           'ownerUid','speciesKey','speciesName','source','baseStats','types','abilities',
           'spriteUrl','spriteData','nickname','level','ability','maxHp','currentHp',
-          'status','slot','heldItem','moves','origin','notes','updatedAt',
-          'teraType','megaForm','megaActive','teraActive','zUsed','dynamaxTurns','dynamaxUsed'
+          'status','slot','heldItem','moves','origin','notes','updatedAt'
         ])
         && d.ownerUid is string && d.ownerUid.size() >= 10 && d.ownerUid.size() <= 128
         && d.speciesKey is string && d.speciesKey.size() > 0 && d.speciesKey.size() <= 110
