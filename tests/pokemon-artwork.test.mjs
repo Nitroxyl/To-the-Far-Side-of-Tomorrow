@@ -98,12 +98,20 @@ function runtime(){
   ';customs=['+JSON.stringify(old)+'];artworkSelected={kind:"species",id:"spinotroleum"};view="artwork-edit";return {updateArtworkRecord,artworkEditorUI,artworkLibraryUI};');
  return {api:fn(...Object.values(mock)),writes,batched};
 }
+test('Already-synced Pokémon do not incur redundant Firestore updates',()=>{
+ const inherited={...species,spriteData:next.spriteData};
+ assert.deepEqual(artworkPropagation('species','spinotroleum',next,next,[inherited]),[]);
+ const megaSynced={id:'synced-mega',megaForm:{...megaForm,spriteData:next.spriteData}};
+ assert.deepEqual(artworkPropagation('mega','mega-charizard-z',next,next,[megaSynced]),[]);
+});
+
 test('GM artwork save updates template artwork only and propagates inherited images',async()=>{
  const {api,writes,batched}=runtime();
  const editor=api.artworkEditorUI();
  assert.match(editor,/artwork-upload/);
  assert.match(editor,/syncExisting/);
  assert.match(editor,/Remove artwork/);
+ assert.match(editor,/Sync saved image/);
  await api.updateArtworkRecord(next,true);
  assert.equal(writes.length,1);
  assert.equal(writes[0].d.path,'santara_species_overrides');
