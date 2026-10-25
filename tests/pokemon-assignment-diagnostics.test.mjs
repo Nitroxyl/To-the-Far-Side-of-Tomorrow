@@ -55,3 +55,21 @@ test('assignment page checks fields and reports authentication+batch context',()
  assert.ok(app.includes('getIdTokenResult(user,true)'));
  assert.ok(app.includes('explainAssignmentDenial(occupying,existing,item)'));
 });
+
+test('GM-only Mega attachment is a narrow update that preserves legacy records',()=>{
+ const start=rules.indexOf('function gmLegacyMegaUpdate()');
+ const end=rules.indexOf('match /santara_pokemon/{pokemonId}',start);
+ assert.ok(start>=0&&end>start);
+ const block=rules.slice(start,end);
+ for(const fragment of [
+  'return gm()',"'megaForm','megaActive','updatedAt'",
+  'request.resource.data.ownerUid == resource.data.ownerUid',
+  'megaSnapshotValid(request.resource.data.megaForm)',
+  'request.resource.data.get(\'megaActive\',false) == false'
+ ]) assert.ok(block.includes(fragment),fragment);
+ assert.ok(rules.slice(end,end+1800).includes('|| gmLegacyMegaUpdate()'));
+ const app=readFileSync(new URL('../pokemon-party.js',import.meta.url),'utf8');
+ assert.ok(app.includes('data-act="mega-only"'));
+ assert.ok(app.includes('async function saveMegaOnly()'));
+ assert.ok(app.includes("await updateDoc(doc(store,'santara_pokemon',mon.id),payload)"));
+});
