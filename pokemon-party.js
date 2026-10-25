@@ -1,5 +1,5 @@
 import {initializeApp,getApps,getApp} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
-import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,signInWithPopup,GoogleAuthProvider} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
+import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,signInWithPopup,GoogleAuthProvider,getIdTokenResult} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
 import {getFirestore,collection,doc,query,where,onSnapshot,getDoc,setDoc,addDoc,deleteDoc,writeBatch,updateDoc,serverTimestamp} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
 import {statKeys,statLabels,validStats,maxHpV4Baseline,combatSummary,fromPokeApi,V52_TIERS} from './pokemon-math.js?v=v52-requests-20261025-2';
 import {TYPE_NAMES,initialUnlocks,megaCompatible,effectivePokemon} from './pokemon-gimmicks.js';
@@ -9,6 +9,7 @@ import {publicPartySlots,partySignature} from './pokemon-public-party.js';
 import {SANTARA_CATALOG_GROUPS,santaraCatalogEntries} from './santara-catalog.js';
 import {artworkEntries,artworkFor,artworkPropagation} from './pokemon-artwork.js';
 import {customContentLibraryUI} from './pokemon-custom-library.js';
+import {assignmentProblems} from './pokemon-assignment-check.js';
 
 const GM_UID='ctBLgrVgkLOzUJYTyYgU9IwejYx1';
 const GM_SITE=window.SANTARA_POKEMON_EDITION==='gm';
@@ -820,6 +821,33 @@ async function saveCustom(form){
  await setDoc(doc(store,'santara_species_overrides',slug),{slug,name,baseStats,types,abilities,spriteUrl:url,spriteData,updatedAt:serverTimestamp()});
  say(name+' saved to the custom species catalogue.');editingCustom=null;if(originLibrary){originLibrary=false;view='custom-library';render()}else clearSelection();
 }
+async function explainAssignmentDenial(occupying,existing,item){
+ const info=[];
+ info.push('Database: '+(window.SANTARA_FIREBASE_CONFIG?.projectId||'unknown'));
+ info.push('Write: '+(existing?'update Pokémon':'create Pokémon')+(occupying?' + occupied slot update':'')+(activeRequestId?' + approve request':''));
+ const invalid=assignmentProblems(item);
+ if(invalid.length)info.push('Fields: '+invalid.slice(0,4).join('; '));
+ try{
+  const token=await getIdTokenResult(user,true);
+  if(user.uid===GM_UID)info.push('Identity: founding GM verified by UID');
+  else{
+   const verified=token.claims?.email_verified===true;
+   const email=String(token.claims?.email||'');
+   const snap=await getDoc(doc(store,'santara_gm_accounts',user.uid));
+   const role=snap.exists()?snap.data():null;
+   if(role?.enabled===true && role.email===email && verified)info.push('Identity: delegated GM role verified');
+   else{
+    info.push('Identity: role/token mismatch');
+    if(!verified)info.push('Firebase Auth email verification missing; refresh Account & GM Access');
+    if(!role?.enabled)info.push('GM role record is not enabled for this UID');
+    else if(role.email!==email)info.push('GM role email differs from signed-in email');
+   }
+  }
+ }catch(error){info.push('GM identity check unavailable: '+(error?.message||error))}
+ if(occupying)info.push('Also updating '+(occupying.nickname||occupying.speciesName)+' in the occupied party slot. Try Storage once to isolate this second write.');
+ if(activeRequestId)info.push('Also updating the request approval status');
+ return info.join(' · ');
+}
 async function saveAssign(form){
  const f=new FormData(form),existing=pokemon.find(x=>x.id===editingId);
  if(!draft&&!existing)throw Error('Fetch an official or custom species first.');
@@ -854,6 +882,8 @@ async function saveAssign(form){
   dynamaxTurns:Math.max(0,Math.min(3,Number(existing?.dynamaxTurns)||0)),
   dynamaxUsed:existing?.dynamaxUsed===true,updatedAt:serverTimestamp()
  };
+ const fieldErrors=assignmentProblems(item);
+ if(fieldErrors.length)throw Error('Pokémon data failed validation: '+fieldErrors.join('; '));
  // Swap out an occupied party slot in the target Trainer's collection.
  const occupying=pokemon.find(m=>m.ownerUid===ownerUid&&m.id!==existing?.id&&Number(m.slot)===slot&&slot>0);
  const batch=writeBatch(store);
@@ -865,7 +895,7 @@ async function saveAssign(form){
   await batch.commit();
  }catch(err){
   if(err?.code==='permission-denied'||/missing or insufficient permissions/i.test(err?.message||'')){
-   throw Error('Firebase denied this Pokémon assignment. Make sure the GM account has an active GM role and the latest Firestore rules are published. Legacy Pokémon now need rules that accept missing optional gimmick fields when party slots are swapped.');
+   throw Error('Firebase denied this assignment. '+await explainAssignmentDenial(occupying,existing,item));
   }
   throw err;
  }
