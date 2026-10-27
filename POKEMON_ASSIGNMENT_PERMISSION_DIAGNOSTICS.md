@@ -1,5 +1,7 @@
 # Pokémon assignment permission denial — targeted repair
 
+> **Update — 27 October 2026:** Mega form linking now uses the independent `santara_pokemon_mega_assignments/{pokemonId}` collection; earlier instructions below about writing `megaForm` into the main Pokémon record are superseded. See [ISOLATED_MEGA_ASSIGNMENTS.md](./ISOLATED_MEGA_ASSIGNMENTS.md) for the current implementation and Firebase rules deployment steps.
+
 ## Why the last Firestore rules publication did not settle the issue
 
 Firestore reports the same **Missing or insufficient permissions** result for a missing GM role, an invalid Pokémon payload, or an invalid *other* record inside the assignment's atomic batch. The GM screen previously replaced all these possibilities with a generic rules warning.
