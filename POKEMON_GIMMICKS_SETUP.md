@@ -1,5 +1,7 @@
 # Santara — Trainer Gimmicks and Mega Evolution
 
+> **Update — 27 October 2026:** Mega form linking now uses the independent `santara_pokemon_mega_assignments/{pokemonId}` collection; earlier instructions below about writing `megaForm` into the main Pokémon record are superseded. See [ISOLATED_MEGA_ASSIGNMENTS.md](./ISOLATED_MEGA_ASSIGNMENTS.md) for the current implementation and Firebase rules deployment steps.
+
 This release adds per-Trainer progression unlocks and temporary Pokémon battle forms to the existing Pokémon Party Manager. Pokémon previously assigned to Trainers remain fully compatible.
 
 ## GM workflow
