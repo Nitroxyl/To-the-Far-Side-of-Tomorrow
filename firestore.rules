@@ -355,9 +355,9 @@ service cloud.firestore {
         && request.resource.data.megaActive is bool
         && request.resource.data.requiredStone is string
         && request.resource.data.requiredStone.size() <= 80
-        && (request.resource.data.megaForm == null
-          ? request.resource.data.requiredStone == ''
-          : request.resource.data.requiredStone.size() > 0)
+        && ((request.resource.data.megaForm == null && request.resource.data.requiredStone == '')
+          || (request.resource.data.megaForm is map
+            && request.resource.data.requiredStone.size() > 0))
         && (!request.resource.data.megaActive
           || (get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.get('heldItem','') is string
             && get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.get('heldItem','').trim().lower()
@@ -370,7 +370,7 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time;
       // Approved owners can toggle the active state, but can NEVER edit
       // the custom Mega stats, form assignment, artwork, or ownership.
-      allow update: if approved()
+      allow update: if member()
         && resource.data.ownerUid == request.auth.uid
         && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.megaForm == resource.data.megaForm
