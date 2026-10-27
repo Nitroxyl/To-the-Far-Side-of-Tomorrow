@@ -7,6 +7,7 @@ import {TYPES,KEYS,unlockUI,libraryUI,editorUI,controlsUI} from './pokemon-gimmi
 import {discoverOfficialMegas,mergeMegaOptions} from './pokemon-official-megas.js';
 import {publicPartySlots,partySignature} from './pokemon-public-party.js';
 import {applyMegaOverlays,cleanMegaSnapshot} from './pokemon-mega-assignments.js';
+import {suggestedMegaStone,hasRequiredMegaStone} from './pokemon-mega-stones.js';
 import {SANTARA_CATALOG_GROUPS,santaraCatalogEntries} from './santara-catalog.js';
 import {artworkEntries,artworkFor,artworkPropagation} from './pokemon-artwork.js';
 import {customContentLibraryUI} from './pokemon-custom-library.js';
@@ -317,6 +318,10 @@ function updateMegaSelector(mon){
  const active=select.value||mon?.megaForm?.slug||'';
  const entries=megaChoiceFor(mon);
  select.innerHTML=option('','No Mega assigned',active)+entries.map(x=>option(x.slug,x.name+(x.source==='official'?' (official)':' (Santara/custom)'),active)).join('');
+ const stoneField=form.elements.requiredStone;
+ if(stoneField&&select.value&&!stoneField.value.trim()){
+  stoneField.value=suggestedMegaStone(mon,entries.find(x=>x.slug===select.value));
+ }
  const status=document.getElementById('mega-availability');
  if(status)status.textContent=entries.length
   ?entries.length+' Mega form(s) available. Official forms load automatically; GM-defined forms override matching official ones.'
@@ -399,6 +404,12 @@ async function gimmickAction(code,m){
  if(code==='mega'){
   if(!enabled.mega||!megaCompatible(m,m.megaForm))throw Error('Mega Evolution is locked or no compatible Mega has been assigned.');
   if(!Object.prototype.hasOwnProperty.call(megaAssignments,m.id))throw Error('Your GM must save this Mega using the new isolated Mega assignment.');
+  const requiredStone=megaAssignments[m.id]?.requiredStone||'';
+  if(!m.megaActive&&!hasRequiredMegaStone(m,requiredStone)){
+   throw Error(requiredStone
+    ?'Mega Evolution requires '+requiredStone+'. This Pokémon is currently holding '+(m.heldItem||'nothing')+'.'
+    :'The GM must save the required Mega Stone for this assigned form first.');
+  }
   if(!m.megaActive&&pokemon.some(p=>p.ownerUid===m.ownerUid&&p.id!==m.id&&p.megaActive===true))throw Error('Another Pokémon is already Mega Evolved. Revert it first.');
   if(!m.megaActive&&(m.teraActive||Number(m.dynamaxTurns)>0))throw Error('Revert Terastallization or end Dynamax before Mega Evolving.');
   await updateDoc(doc(store,'santara_pokemon_mega_assignments',m.id),{megaActive:!m.megaActive,updatedAt:serverTimestamp()});
@@ -702,7 +713,7 @@ function detail(m){
  <div class="move-list">${(m.moves||[]).length?(m.moves||[]).map(name=>{
  const info=moveInfo[name];return `<div class="move"><b>${esc(name)}</b><div class="hint">${info?`${esc(info.type)} · ${esc(info.category)} · BP ${info.power??'—'} · Accuracy ${info.accuracy??'—'}`:'Move details not available'}</div>${info?.dice?`<p class="hint">Damage dice: ${esc(info.dice)}</p>`:''}${info?.description?`<p class="hint">${esc(info.description)}</p>`:''}</div>`;
  }).join(''):'<div class="hint">No moves assigned by the GM yet.</div>'}</div></section>
- ${controlsUI(m,unlocks(m.ownerUid),esc,option,megaCompatible(m,m.megaForm))}<section class="panel"><h3>Battle tracking</h3><p class="hint">${shown.dynamax?`Dynamax HP: ${shown.currentHp}/${shown.maxHp}. Stored base HP: ${m.currentHp}/${m.maxHp}.`:"Mega Evolution does not alter tracked maximum HP (consistent with standard Mega HP rules)."}</p><form id="track-form" class="form-grid">
+ ${controlsUI(m,unlocks(m.ownerUid),esc,option,megaCompatible(m,m.megaForm),megaAssignments[m.id]?.requiredStone||'')}<section class="panel"><h3>Battle tracking</h3><p class="hint">${shown.dynamax?`Dynamax HP: ${shown.currentHp}/${shown.maxHp}. Stored base HP: ${m.currentHp}/${m.maxHp}.`:"Mega Evolution does not alter tracked maximum HP (consistent with standard Mega HP rules)."}</p><form id="track-form" class="form-grid">
  <label class="field">Current HP <span class="hint">Maximum ${m.maxHp}</span><input name="currentHp" type="number" min="0" max="${m.maxHp}" required value="${m.currentHp}"></label>
  <label class="field">Status<select name="status">${statuses.map(s=>option(s,s,m.status||'None')).join('')}</select></label>
  <label class="field">Party slot <span class="hint">Storage = 0</span><select name="slot">${Array.from({length:7},(_,i)=>option(i,i===0?'Storage':`Slot ${i}`,m.slot||0)).join('')}</select></label>
@@ -735,7 +746,9 @@ function gmForm(){
  <label class="field">Tera Type<select name="teraType">${TYPES.map(t=>option(t,t[0].toUpperCase()+t.slice(1),d.teraType||d.types?.[0]||'normal')).join('')}</select></label>
  <label class="field full">Mega Evolution form<select name="megaSlug">${option('','No Mega assigned',d.megaForm?.slug||'')}${megaChoiceFor(d).map(f=>option(f.slug,f.name,d.megaForm?.slug||'')).join('')}</select>
  <span class="hint">Official Mega forms are discovered automatically from PokéAPI. Santara custom and reworked Megas appear alongside them.</span><span class="hint" id="mega-availability" aria-live="polite">${d.source==='custom'?'Custom species: choose a registered Santara Mega form.':d.speciesKey?'Looking up official Mega forms…':'Fetch the regular species first to discover its Mega Evolutions.'}</span></label>
+ <label class="field">Required Mega Stone<input name="requiredStone" maxlength="80" value="${esc(megaAssignments[existing?.id]?.requiredStone||suggestedMegaStone(d,megaChoiceFor(d).find(x=>x.slug===d.megaForm?.slug)||d.megaForm))}" placeholder="e.g. Charizardite Z"><span class="hint">Set by the GM for this assigned Mega. Custom stone names are supported.</span></label>
  <label class="field">Held item<input name="heldItem" maxlength="80" value="${esc(d.heldItem||'')}"></label>
+ ${existing?'<div class="actions"><button type="button" class="btn small" data-act="equip-mega-stone">Equip required Mega Stone</button></div>':''}
  <div class="field full"><span class="eyebrow">Four move slots</span><p class="hint">Choose one move per slot. Each field searches the official learnset and your saved custom moves.</p>
  <div class="move-fields">${Array.from({length:4},(_,i)=>`<label class="field">Move ${i+1}<input name="move${i+1}" maxlength="48" list="known-moves" placeholder="Search or type a move" value="${esc((d.moves||[])[i]||'')}"></label>`).join('')}</div>
  <datalist id="known-moves">${moveOptions(d).map(name=>`<option value="${esc(name)}"></option>`).join('')}</datalist>
@@ -878,6 +891,17 @@ async function explainAssignmentDenial(occupying,existing,item){
  if(activeRequestId)info.push('Also updating the request approval status');
  return info.join(' · ');
 }
+async function equipMegaStone(){
+ if(!GM_SITE||!editingId)throw Error('Open an existing Pokémon first.');
+ const mon=pokemon.find(x=>x.id===editingId);
+ const form=document.getElementById('assign-form');
+ if(!mon||!form)throw Error('The selected Pokémon is not available.');
+ const stone=String(form.elements.requiredStone?.value||'').trim();
+ if(!stone||stone.length>80)throw Error('Choose a Mega form and required stone first.');
+ await updateDoc(doc(store,'santara_pokemon',mon.id),{heldItem:stone,updatedAt:serverTimestamp()});
+ if(form.elements.heldItem)form.elements.heldItem.value=stone;
+ say((mon.nickname||mon.speciesName)+' now holds '+stone+'. Save Mega form only if its required stone has changed.');
+}
 async function saveMegaOnly(){
  if(!GM_SITE||!editingId)throw Error('Open an existing Pokémon to attach a Mega form.');
  const mon=pokemon.find(x=>x.id===editingId);
@@ -888,10 +912,12 @@ async function saveMegaOnly(){
  const entry=slug?megaChoiceFor(mon).find(f=>f.slug===slug):null;
  if(slug&&(!entry||!megaCompatible(mon,entry)))throw Error('Choose a Mega form compatible with the existing Pokémon species.');
  const megaForm=cleanMegaSnapshot(mon,entry||null);
+ const requiredStone=entry?String(form.elements.requiredStone?.value||'').trim():'';
+ if(entry&&(!requiredStone||requiredStone.length>80))throw Error('Required Mega Stone must be 1–80 characters.');
  // This is NOT an update to santara_pokemon. An independent owner-scoped
  // record means an old Pokémon's unknown fields and schemas cannot block it.
  const target=doc(store,'santara_pokemon_mega_assignments',mon.id);
- const payload={ownerUid:mon.ownerUid,megaForm,megaActive:false,updatedAt:serverTimestamp()};
+ const payload={ownerUid:mon.ownerUid,megaForm,requiredStone,megaActive:false,updatedAt:serverTimestamp()};
  try{
   await setDoc(target,payload);
  }catch(err){
@@ -1050,6 +1076,7 @@ root.addEventListener('click',async e=>{
     say(`${species.speciesName} imported. Check level, HP, moves and Trainer assignment before saving.`);render();
   }
   if(action==='mega-only'&&GM_SITE){busy=true;await saveMegaOnly()}
+  if(action==='equip-mega-stone'&&GM_SITE){busy=true;await equipMegaStone()}
   if(action==='edit'&&GM_SITE){
    editingId=b.dataset.id;draft={...pokemon.find(x=>x.id===editingId)};
    if(draft.source==='official'){
@@ -1081,6 +1108,11 @@ root.addEventListener('input',e=>{
  }
 });
 root.addEventListener('change',e=>{
+ if(e.target.name==='megaSlug'&&view==='assign'){
+  const form=e.target.closest('form'),mon=draft||pokemon.find(x=>x.id===editingId);
+  const selected=megaChoiceFor(mon).find(x=>x.slug===e.target.value);
+  if(form?.elements.requiredStone)form.elements.requiredStone.value=suggestedMegaStone(mon,selected);
+ }
  if(e.target.id==='library-kind'&&view==='custom-library'){libraryKind=e.target.value;render();return}
  if(e.target.id==='artwork-kind-filter'&&view==='artwork-library'){
   artworkKind=e.target.value;
