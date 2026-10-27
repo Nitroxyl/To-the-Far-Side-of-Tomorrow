@@ -887,23 +887,22 @@ async function saveMegaOnly(){
  const slug=String(form.elements.megaSlug?.value||'');
  const entry=slug?megaChoiceFor(mon).find(f=>f.slug===slug):null;
  if(slug&&(!entry||!megaCompatible(mon,entry)))throw Error('Choose a Mega form compatible with the existing Pokémon species.');
- const megaForm=entry?{
-  slug:entry.slug,name:entry.name,baseSpeciesKey:entry.baseSpeciesKey,
-  baseStats:entry.baseStats,types:entry.types,ability:entry.ability,
-  spriteUrl:entry.spriteUrl||'',spriteData:entry.spriteData||'',
-  source:entry.source||'custom'
- }:null;
- const payload={megaForm,megaActive:false,updatedAt:serverTimestamp()};
+ const megaForm=cleanMegaSnapshot(mon,entry||null);
+ // This is NOT an update to santara_pokemon. An independent owner-scoped
+ // record means an old Pokémon's unknown fields and schemas cannot block it.
+ const target=doc(store,'santara_pokemon_mega_assignments',mon.id);
+ const payload={ownerUid:mon.ownerUid,megaForm,megaActive:false,updatedAt:serverTimestamp()};
  try{
-  await updateDoc(doc(store,'santara_pokemon',mon.id),payload);
+  await setDoc(target,payload);
  }catch(err){
   if(err?.code==='permission-denied'||/missing or insufficient permissions/i.test(err?.message||'')){
-   const diagnosis=await explainAssignmentDenial(null,mon,{...mon,...payload});
-   throw Error('Firebase denied even the isolated Mega attachment. '+diagnosis);
+   throw Error('Firebase denied the NEW isolated Mega assignment (santara_pokemon_mega_assignments). This is a different collection from the Pokémon record. Publish the latest GM firestore.rules that grants GM-only writes to this collection. No Pokémon data was changed. Original error: '+err.message);
   }
   throw err;
  }
- say('Mega form '+(entry?entry.name:'cleared')+' saved to '+(mon.nickname||mon.speciesName)+'. Other Pokémon fields were left unchanged.');
+ const missingArtwork=Boolean(entry?.spriteData&&!megaForm?.spriteData);
+ say('Mega form '+(entry?entry.name:'cleared')+' assigned to '+(mon.nickname||mon.speciesName)+'. Original Pokémon unchanged.'+
+  (missingArtwork?' The uploaded artwork was too large or invalid for Firestore and was excluded from the form snapshot.':''));
  clearSelection();
 }
 async function saveAssign(form){
