@@ -341,19 +341,36 @@ service cloud.firestore {
     // Mega assignments are kept separate from Pokémon instances. This allows
     // older Pokémon to receive a validated GM-approved Mega without rewriting
     // old Pokémon records or giving players editing rights to Mega stats.
+    // Independent GM-curated Mega form and per-battle Mega state.
+    // Changes never rewrite the legacy Pokemon record.
     match /santara_pokemon_mega_assignments/{pokemonId} {
       allow get, list: if gm()
         || (approved() && resource.data.ownerUid == request.auth.uid);
       allow create, update: if gm()
         && exists(/databases/$(database)/documents/santara_pokemon/$(pokemonId))
-        && request.resource.data.keys().hasOnly(['ownerUid','megaForm','updatedAt'])
-        && request.resource.data.keys().hasAll(['ownerUid','megaForm','updatedAt'])
+        && request.resource.data.keys().hasOnly(['ownerUid','megaForm','megaActive','updatedAt'])
+        && request.resource.data.keys().hasAll(['ownerUid','megaForm','megaActive','updatedAt'])
         && request.resource.data.ownerUid ==
           get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.ownerUid
+        && request.resource.data.megaActive is bool
         && (request.resource.data.megaForm == null
           || (megaSnapshotValid(request.resource.data.megaForm)
             && request.resource.data.megaForm.baseSpeciesKey ==
               get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.speciesKey))
+        && (!request.resource.data.megaActive || request.resource.data.megaForm is map)
+        && request.resource.data.updatedAt == request.time;
+      // Approved owners can toggle the active state, but can NEVER edit
+      // the custom Mega stats, form assignment, artwork, or ownership.
+      allow update: if approved()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.megaForm == resource.data.megaForm
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['megaActive','updatedAt'])
+        && request.resource.data.megaActive is bool
+        && (request.resource.data.megaActive == false || resource.data.megaForm is map)
+        && gimmickGranted(request.auth.uid,'mega')
+        && get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.get('teraActive',false) == false
+        && get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.get('dynamaxTurns',0) == 0
         && request.resource.data.updatedAt == request.time;
       allow delete: if gm();
     }
