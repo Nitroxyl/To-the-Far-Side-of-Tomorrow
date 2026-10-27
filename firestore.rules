@@ -348,11 +348,20 @@ service cloud.firestore {
         || (approved() && resource.data.ownerUid == request.auth.uid);
       allow create, update: if gm()
         && exists(/databases/$(database)/documents/santara_pokemon/$(pokemonId))
-        && request.resource.data.keys().hasOnly(['ownerUid','megaForm','megaActive','updatedAt'])
-        && request.resource.data.keys().hasAll(['ownerUid','megaForm','megaActive','updatedAt'])
+        && request.resource.data.keys().hasOnly(['ownerUid','megaForm','requiredStone','megaActive','updatedAt'])
+        && request.resource.data.keys().hasAll(['ownerUid','megaForm','requiredStone','megaActive','updatedAt'])
         && request.resource.data.ownerUid ==
           get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.ownerUid
         && request.resource.data.megaActive is bool
+        && request.resource.data.requiredStone is string
+        && request.resource.data.requiredStone.size() <= 80
+        && (request.resource.data.megaForm == null
+          ? request.resource.data.requiredStone == ''
+          : request.resource.data.requiredStone.size() > 0)
+        && (!request.resource.data.megaActive
+          || (get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.get('heldItem','') is string
+            && get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.get('heldItem','').trim().lower()
+              == request.resource.data.requiredStone.trim().lower()))
         && (request.resource.data.megaForm == null
           || (megaSnapshotValid(request.resource.data.megaForm)
             && request.resource.data.megaForm.baseSpeciesKey ==
@@ -367,7 +376,13 @@ service cloud.firestore {
         && request.resource.data.megaForm == resource.data.megaForm
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['megaActive','updatedAt'])
         && request.resource.data.megaActive is bool
-        && (request.resource.data.megaActive == false || resource.data.megaForm is map)
+        && (request.resource.data.megaActive == false
+          || (resource.data.megaForm is map
+            && resource.data.get('requiredStone','') is string
+            && resource.data.get('requiredStone','').size() > 0
+            && get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.get('heldItem','') is string
+            && get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.get('heldItem','').trim().lower()
+               == resource.data.requiredStone.trim().lower()))
         && gimmickGranted(request.auth.uid,'mega')
         && get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.get('teraActive',false) == false
         && get(/databases/$(database)/documents/santara_pokemon/$(pokemonId)).data.get('dynamaxTurns',0) == 0
@@ -375,6 +390,14 @@ service cloud.firestore {
       allow delete: if gm();
     }
 
+    function gmLegacyHeldItemUpdate() {
+      return gm()
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['heldItem','updatedAt'])
+        && request.resource.data.heldItem is string
+        && request.resource.data.heldItem.size() <= 80
+        && request.resource.data.updatedAt == request.time;
+    }
     match /santara_pokemon/{pokemonId} {
       allow get, list: if gm() || (approved() && resource.data.ownerUid == request.auth.uid);
       allow create: if gm() && pokemonValid(request.resource.data);
@@ -382,18 +405,15 @@ service cloud.firestore {
       allow update: if (gm() && pokemonValid(request.resource.data))
         || gmLegacySlotUpdate()
         || gmLegacyMegaUpdate()
+        || gmLegacyHeldItemUpdate()
         || (approved() && resource.data.ownerUid == request.auth.uid
           && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'currentHp','status','slot','nickname','notes','updatedAt',
-            'teraType','teraActive','megaActive','zUsed','dynamaxTurns','dynamaxUsed'
+            'teraType','teraActive','zUsed','dynamaxTurns','dynamaxUsed'
           ])
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['teraType','teraActive'])
              || gimmickGranted(resource.data.ownerUid,'tera'))
-          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['megaActive'])
-             || (gimmickGranted(resource.data.ownerUid,'mega')
-                && resource.data.get('megaForm',null) is map
-                && resource.data.megaForm.baseSpeciesKey == resource.data.speciesKey))
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['zUsed'])
              || gimmickGranted(resource.data.ownerUid,'zMove'))
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['dynamaxTurns','dynamaxUsed'])
