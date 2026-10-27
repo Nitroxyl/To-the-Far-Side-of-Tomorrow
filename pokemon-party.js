@@ -945,11 +945,9 @@ async function saveAssign(form){
  const megaSlug=String(f.get('megaSlug')||'');
  const selectedMega=megaSlug?megaChoiceFor(d).find(x=>x.slug===megaSlug):null;
  if(megaSlug&&(!selectedMega||!megaCompatible(d,selectedMega)))throw Error('Selected Mega does not match the regular species.');
- const megaForm=selectedMega?{
-  slug:selectedMega.slug,name:selectedMega.name,baseSpeciesKey:selectedMega.baseSpeciesKey,
-  baseStats:selectedMega.baseStats,types:selectedMega.types,ability:selectedMega.ability,
-  spriteUrl:selectedMega.spriteUrl||'',spriteData:selectedMega.spriteData||'',source:selectedMega.source||'custom'
- }:null;
+ const megaForm=cleanMegaSnapshot(d,selectedMega||null);
+ const requiredStone=megaForm?String(f.get('requiredStone')||'').trim():'';
+ if(megaForm&&(!requiredStone||requiredStone.length>80))throw Error('Provide a required Mega Stone name (1–80 characters).');
  if(!Number.isInteger(level)||level<1||level>100)throw Error('Level must be between 1 and 100.');
  if(!Number.isInteger(slot)||slot<0||slot>6)throw Error('Choose a valid party slot.');
  if(!Number.isInteger(maxHp)||maxHp<1||maxHp>3000||!Number.isInteger(currentHp)||currentHp<0||currentHp>maxHp)throw Error('Current HP must be between 0 and maximum HP.');
@@ -972,8 +970,8 @@ async function saveAssign(form){
  const batch=writeBatch(store);
  if(occupying)batch.update(doc(store,'santara_pokemon',occupying.id),{slot:existing?.ownerUid===ownerUid?Number(existing.slot)||0:0,updatedAt:serverTimestamp()});
  if(activeRequestId){batch.update(doc(store,'santara_pokemon_requests',activeRequestId),{status:'approved',resolvedAt:serverTimestamp()});}
- if(existing)batch.set(doc(store,'santara_pokemon',existing.id),item);
- else batch.set(doc(collection(store,'santara_pokemon')),item);
+ const monRef=existing?doc(store,'santara_pokemon',existing.id):doc(collection(store,'santara_pokemon'));
+ batch.set(monRef,item);
  try{
   await batch.commit();
  }catch(err){
@@ -981,6 +979,22 @@ async function saveAssign(form){
    throw Error('Firebase denied this assignment. '+await explainAssignmentDenial(occupying,existing,item));
   }
   throw err;
+ }
+ // A new Pokémon's document must exist before its isolated Mega link can
+ // be saved. Store that link separately, without requiring a Mega Stone in
+ // the held-item slot. The stone is checked only when Mega Evolving.
+ const shouldSyncMega=Boolean(megaForm||(existing&&Object.prototype.hasOwnProperty.call(megaAssignments,existing.id)));
+ if(shouldSyncMega){
+  try{
+   await setDoc(doc(store,'santara_pokemon_mega_assignments',monRef.id),{
+    ownerUid,megaForm,requiredStone,megaActive:false,updatedAt:serverTimestamp()
+   });
+  }catch(err){
+   // The original Pokémon has already been saved. Report partial success
+   // rather than implying the entire assignment was rolled back.
+   clearSelection();
+   throw Error('Pokémon saved, but linking its Mega form failed: '+(err?.message||String(err))+'. Open the Pokémon again and use Save Mega form only.');
+  }
  }
  say('Pokémon saved and synced to the Trainer account.');clearSelection();
 }
